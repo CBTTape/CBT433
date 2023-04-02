@@ -1,0 +1,26 @@
+/* REXX     MREN     Rename a member
+                     Syntax:  MREN  original_name  new_name
+                     MREN  --MUST-- be called from a command table
+                     entry with ZCTACT of
+          SELECT CMD(MREN |&zdsn |&zmem |&zmemb |&zparm)
+
+*/ arg argline                         /* pro-forma quick-start      */
+address TSO
+arg parms "((" opts
+opts = Strip(opts,"T",")")
+parse var opts "TRACE"  tv  .
+parse value tv "N"  with  tv .
+rc = Trace("O"); rc = Trace(tv)
+
+dlm = Left(parms,1)
+parse var parms  (dlm) zdsn  . (dlm) . (dlm) . (dlm) parmdta
+parse var parmdta  origmem  newmem  .
+if newmem = "" then do
+   say "Syntax error: Must specify a member to be renamed",
+           "and the new member name."
+   exit
+   end                                 /* newmem blank               */
+
+"PDS  '"zdsn"'  RENAME" origmem  newmem
+
+exit                                   /*@ MREN                      */

@@ -1,0 +1,37 @@
+/*** REXX ************************************************************/
+/* TSOHELP - This EXEC traps the output of the TSO Help command and  */
+/*           puts the user into ISPF BROWSE on the results.          */
+/*********************************************************************/
+
+  call on error
+
+  address ispexec
+  "CONTROL ERRORS RETURN"
+
+  call outtrap "LINE."
+
+  address tso "HELP" arg(1)
+
+  call outtrap "OFF"
+
+  if line.0 > 0 then
+    do
+      cmd_dd = "C"random()
+      address TSO "ALLOCATE FILE("cmd_dd")",
+                  "REUSE UNIT(sysda) SPACE(1 1)",
+                  "CYLINDER DSORG(PS) RECFM(V B) LRECL(255)"
+       address TSO "EXECIO" LINE.0 "DISKW" cmd_dd "(STEM LINE. FINIS"
+       "LMINIT DATAID(DATAID) DDNAME("cmd_dd")"
+       "VIEW   DATAID("dataid") PROFILE(REXX)"
+       "LMFREE DATAID("dataid")"
+       address TSO "FREE FILE("cmd_dd")"
+    end
+
+exit
+
+error:
+  zerrsm = "Return code" rc
+  zerrlm = "Return code from command is" rc zerralrm = "YES"
+  zerrhm = "*"
+  "SETMSG MSG(ISRZ002)"
+  return

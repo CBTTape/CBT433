@@ -1,0 +1,32 @@
+/* REXX    IDENT       changes the start-comment and end-mainline-comment
+                       to indicate the correct membername.
+*/
+address ISREDIT
+"MACRO"
+"F 'REXX' FIRST"
+"(text) = LINE .zcsr"
+if Left(text,2) <> '615c'x then,       /* not a comment -- BOOM      */
+   do
+   say "No REXX comment"
+   exit
+   end
+parse var text 'REXX' tag .
+"(mbrnm) = MEMBER"
+if tag <> "" then,
+   "C '"tag"'" mbrnm
+else do
+   "C 'REXX'  'REXX    @' "
+   "CURSOR =" .zcsr 1
+   "C '@'"  mbrnm
+   end
+"F '615c7c'x"                          /* slash asterisk yat         */
+repl = '615c7c'x mbrnm
+"(text) = LINE .zcsr"
+pta = Pos('615c7c'x,text) + 3
+ptb = Pos('5c61'x,text) - 2
+"C all p'=' ' ' " pta ptb .zcsr .zcsr
+"CURSOR =" .zcsr 1
+"F '615c7c'x"  .zcsr .zcsr
+"C * '"repl"'" .zcsr .zcsr
+
+exit                                   /*@ IDENT                     */
