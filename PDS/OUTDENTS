@@ -1,0 +1,18 @@
+/* REXX */
+address ISREDIT
+'MACRO'
+"X ALL"
+"f all word if"
+"f all word then"
+"f all word else"
+"F all word do"
+"F all word end"
+"F all word on"
+"F all word begin"
+"F all word proc  "
+"f all word procedure"
+"f all word select"
+"f all word when"
+"F all word otherwise"
+"CURSOR = 1 1"
+exit 1

@@ -1,0 +1,76 @@
+/* REXX    ISOLATE    Place your cursor on a word and issue "ISOLATE".
+                      Everything will be excluded except all
+                      occurrences of the word.
+*/
+address ISREDIT
+"MACRO (opts)"
+upper opts
+call A_INIT
+rc = Trace("O") ; rc = Trace(tv)
+
+"(wrow,wcol) = CURSOR"                 /* where am I ?               */
+wcol = Max(wcol,1)
+"(text)      = LINE .zcsr"             /* seize text                 */
+
+text  = Translate(text," ","(.,=+-/;*:)")
+
+pt = LastPos(" ",Left(text,wcol))      /* preceeding blank           */
+pt   = Max(pt  ,1)
+text = substr(text,pt)                 /* snip                       */
+parse var text      lookfor .          /* find the word to look for  */
+
+"X ALL"
+"F ALL '"lookfor"'" findmode
+
+exit                                   /*@ ISOLATE                   */
+/*
+.  ----------------------------------------------------------------- */
+A_INIT:                                /*@                           */
+   address ISPEXEC
+
+   parse value "0" with,
+               sw.  ,
+               $isoprm   t1  tv   .
+   "VGET $ISOPRM PROFILE"
+   argln = $isoprm opts
+   do while argln <> ""
+      parse var argln t1  argln
+      select
+         when t1 = "?"     then call HELP
+         when t1 = "TRACE" then do
+            parse var argln tv  argln
+            end
+         when t1 = "WORD" then do
+            sw.0word =  1
+            end
+         when t1 = "STR" then do
+            sw.0word =  0
+            end
+         otherwise nop
+      end                              /* select                     */
+   end                                 /* argln                      */
+   parse value tv "N"  with tv .
+   $isoprm = ""
+   if sw.0word then $isoprm = $isoprm "WORD"
+               else $isoprm = $isoprm "STR"
+   "VPUT $ISOPRM PROFILE"
+   if sw.0word then findmode = "WORD"
+               else findmode =
+
+return                                 /*@ A_INIT                    */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+   address TSO
+
+address ISPEXEC "CONTROL DISPLAY SAVE "
+"CLEAR"; say ;
+say " ISOLATE    <WORD | STR> "
+say
+say "     will find the word/string at the cursor location, excluding"
+say "     all other text.    'WORD' or 'STR' is remebered from the   "
+say "     prior execution and stays set until it is reset.  "
+say
+address ISPEXEC "CONTROL DISPLAY RESTORE"
+
+exit                                   /*@ HELP                      */
