@@ -1,0 +1,12 @@
+/* REXX    PERMCLAS   provides class names for allocations to allow
+      data retention longer than the default.  The caller is presumed
+      to have prepared an appropriate stack to hold the queued data.
+
+           Written by Frank Clarke 20160909
+*/
+address TSO
+
+queue "MCLAS ...."                     /* set these appropriately    */
+queue "SCLAS ...."                     /* set these appropriately    */
+
+exit                                   /*@ PERMCLAS                  */

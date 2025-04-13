@@ -1,0 +1,21 @@
+/* REXX    VWBR       Invoke View from Browse.
+
+       NOTE ::::      MUST    be invoked via the command table:
+                      SELECT CMD(%VWBR |&ZDSN |&ZMEM |&ZMEMB |&ZLINES)
+                      Requires POSIT macro.
+
+           Written by Frank Clarke, rexxhead@yahoo.com
+*/
+parse upper arg "|"zdsn "|"zmem "|"zmemb "|"zlines
+
+ebdsn   = Strip(zdsn)
+parse value  zmem zmemb             with  ebmem  .
+parse value  Strip(zlines,,0)  0    with  ebtl   .
+
+if ebmem <> "" then ebdsn = ebdsn"("ebmem")"
+
+address ISPEXEC
+"VPUT (ebtl) SHARED"
+"CONTROL NONDISPL ENTER"
+"VIEW DATASET('"ebdsn"') MACRO(POSIT) PROFILE(DEFAULT)"
+exit                                   /*@ VWBR                      */

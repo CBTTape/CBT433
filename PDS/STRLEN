@@ -1,0 +1,41 @@
+/* REXX    STRLEN   based upon COLS2 (by Manjit Nagra).  This macro
+                    inserts a COLS line at the position of the first
+                    quoted character on the cursor-line.
+*/
+address ISREDIT
+"MACRO"
+"(LINENUM1,COLNUM) = CURSOR"
+if colnum = 0 then colnum = 1
+"(DATARECW)        = DATA_WIDTH"
+"(text) = LINE .zcsr"                  /* acquire the text           */
+call WHICH_QT
+if qt = "" then do
+   say "No quoted string"
+   exit
+   end
+start = Pos(qt ,text)+1                /* first character            */
+end   = Pos(qt ,text,start)-1          /* last character             */
+rulelen = end + 1 - start
+collin   = '----+----1----+----2----+----3----+----4' ||,
+           '----+----5----+----6----+----7----+'
+datlin   = Copies(' ',start-1)Left(collin,rulelen)
+"ISREDIT LINE_BEFORE" LINENUM1 "  = NOTELINE (datlin)"
+exit                                   /*@                           */
+/*
+.  ----------------------------------------------------------------- */
+WHICH_QT:                              /*@                           */
+   address ISREDIT
+
+   qt = ""
+   pts  = Pos("'",text,colnum)         /* single quote               */
+   ptd  = Pos('"',text,colnum)         /* double quotes              */
+   if pts < colnum & ptd >= colnum then qt = '"'
+   if ptd < colnum & pts >= colnum then qt = "'"
+   if qt <> "" then return             /* done                       */
+
+   if pts > 0 & ptd > 0 then do        /* both exist!!               */
+      if pts < ptd    then qt = "'"; else,
+      if ptd < pts    then qt = '"'
+      end                              /* both                       */
+
+return                                 /*@ WHICH_QT                  */

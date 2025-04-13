@@ -1,0 +1,64 @@
+/* REXX     S2PTRIM   Examine a SEQ2PDS dataset and populate the queue
+                      with data representing
+.                     (a) the membername,
+                      (b) the line# of the first line of text,
+                      (c) the line# of the last line of text,
+                      (d) the attached statistics, if any
+.           Work the data from bottom to top.  The last NX line will be
+            a "./ REPL NAME=mbr".  Capture the stats, if any, with line
+            numbers, and return the data in the queue.
+.           Recently, PDS2SEQ was altered to place the member stats on
+            the same line as the IEBUPDTE control statement.  This macro
+            now recognizes that change.  Nevertheless, backups still
+            exist in both forms.
+*/
+address ISREDIT
+"MACRO (opts)"
+if rc = 20 then do                     /* ISREDIT not available      */
+   address TSO
+   parse source  .  .  exec_name .
+   ex_nam = Left(exec_name,8)          /* predictable size           */
+   helpmsg = ex_nam "is an EDIT macro"
+   say helpmsg
+   end
+parse var opts  parms "((" opts
+upper opts
+opts = Strip( opts,'T',')' )           /* yes we want no bananas     */
+parse value ""  with  tv
+parse var opts "TRACE" tv .
+parse value tv "N" with tv .
+rc = Trace('O') ; rc = Trace(tv)
+
+parse value "" with  stats.  mbr
+parse value "0 0 0 0 0 0" with  top bot l# .
+
+"X ALL "
+"F ALL './' 1 "
+"( bot ) = LINENUM .zlast "            /* initial value              */
+
+"F LAST './' 1 NX "
+do forever
+   if rc > 0 then leave
+   "( txt ) = LINE .zcsr "             /* the contents               */
+   "( l#  ) = LINENUM .zcsr "          /* the line number            */
+   parse var txt 'NAME='mbr  stats.mbr
+   top   = l# + 1                      /* next line #                */
+   if stats.mbr = '' then do
+      "( sttxt ) = LINE" top           /* maybe stats?               */
+      if Left( sttxt,1 ) = '<' then do /* yes, it is                 */
+         parse var sttxt '<' stats.mbr '>'
+         top = top + 1                 /* first data line            */
+         end
+      end                              /* blank stats                */
+   else sttxt = stats.mbr
+
+   if WordPos( "*ALIAS",sttxt ) = 0 then,
+      push Left( mbr,9 ) Right( top,6 ),
+                         Right( bot+0,6 ) '   'Strip( stats.mbr )
+
+   bot  = l# - 1                       /* line before ./             */
+   "F PREV './' 1 NX "
+end                                    /* forever                    */
+"CANCEL"
+
+exit                                   /*@ S2PTRIM                   */

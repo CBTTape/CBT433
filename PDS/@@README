@@ -1,0 +1,68 @@
+/*
+ Almost all of the software found here is 'REXXSKEL-based'.  That is, the core
+ of the routine is member REXXSKEL, with the specific tasks of the routine being
+ added post-REXXSKEL.  REXXSKEL provides about 250 lines of boilerplate
+ diagnostic and parsing routines among which are SWITCH, KEYWD, KEYPHRS, and
+ CLKWD.  Even routines that are NOT 'REXXSKEL-based' will exhibit some of the
+ characteristics of their more complex siblings.
+
+ REXXSKEL-based routines all behave similarly.  Calling such a routine with a
+ single question mark
+      ===> tso zork ?
+ will deliver the HELP-text for the routine including its calling syntax.
+ (Macros do not usually have HELP text.)  Parameters for such software are split
+ by a double open parenthesis '((' into 'parms' before and 'opts' following.
+ These can be thought of as 'what shall we do' and 'how shall we do it'.
+
+ Tracing is built-in to REXXSKEL (and therefore into all code based on it) such
+ that a caller can invoke any such routine in their preferred trace-mode by
+ simply
+      ===> tso zork (( trace ?r
+ A failing program that is adequately modularized can be debugged quickly and
+ efficiently without a single change to the program because it is not necessary
+ to alter the code in order to turn on tracing.  Modularization enables tracing
+ to be selectively turned off when not necessary for debugging.  If 'trace o' is
+ issued in module M, subsequent calls from module M to other modules will be as
+ if TRACE was OFF for them, but when module M returns to its caller, the TRACE
+ setting is restored to what it was at the time of the call to module M.  Robust
+ modularization enables the analyst to bypass tracing for entire logical trees.
+
+ Many of these routines carry a banner:
+               WARNING: EMBEDDED COMPONENTS.
+ Such routines have (typically) ISPF assets in a comment at the bottom of the
+ code.  Subroutine DEIMBED extracts those assets and LIBDEFs them into
+ preferential positions making them available to their caller.  This technique
+ is blazingly fast compared to finding panels or skeletons on ISPPLIB or ISPSLIB
+ and completely eliminates the necessity of TEST-mode in ISPF.
+
+ Most routines have an 'Impact Analysis' section that lists the external
+ routines called.  Some of those entries appear as (e.g.)
+   .    (alias)   SEESTATS
+ This indicates that, in this case, SEESTATS is an alias of the main member (in
+ this case, FIXSTATS).  When such a main member is updated, run REALIAS against
+ it to re-establish all the proper aliases.  You should never update an alias
+ member directly.  REXXIA performs an analysis based on those Impact Analysis
+ blocks to create a report of dependencies.
+
+ Although these members are presented in a F-80 format, please notice that they
+ are unnumbered.  Many, if not most, of these utilize the space in 73-80, as
+ here, for data or code.  As such, they CANNOT be safely renumbered, and they
+ don't need to be, either.
+
+ Many routines within this dataset are related.  For instance, there is a member
+ (#INDEX) that is created by MEMIDX but which may be affected by POPINDX.
+ Others are routines that have been superseded by newer code but which still
+ retain value because they still work or because they are educational (e.g.:
+ ACQ).
+
+ ACQ        PDSCOPYD   SEIZE
+ FAMTREE    BRTHDAYS   FTIMPORT   REORDER   SHUFFLE
+ FLTTBL     RSTTBL
+ KED        KBR    KVW   (aliases)
+ MEMIDX     POPINDX
+ PDS2SEQ    SEQ2PDS
+ STAKEDIT   STAKBROW  STAKVIEW (aliases)
+ SUPBR      SUPED
+ TBLGEN     TBLMSTR
+
+*/

@@ -1,0 +1,108 @@
+/* REXX    SETALIAS   creates aliases for members of a partitioned
+                      dataset.
+           Use '(routine name)  ?' for HELP-text.
+
+*/ arg argline                         /* pro-forma quick-start      */
+address TSO
+arg parms "((" opts
+opts = Strip(opts,"T",")")
+parse var opts "TRACE"  tv  .
+parse value tv "N"  with  tv .
+rc = Trace("O"); rc = Trace(tv)
+
+parse value "" with helpmsg .          /* init                       */
+if parms = "?" then call HELP
+
+parse var parms baseparm memparm aliasparm
+if aliasparm = "" then,
+   sw.0onepass = "0"                   /* run continuous             */
+else,                                  /* all three as parms         */
+   sw.0onepass = "1"                   /* single-cycle               */
+
+do forever
+
+   if baseparm = "" then do
+      say " Enter base dataset name:"
+      pull dsn .                       /* get base dsn               */
+      end
+   else parse value baseparm with dsn baseparm
+
+   if dsn = "" then leave
+   if substr(dsn,1,1) = "'" then,
+      dsn = Strip(dsn,,"'")            /* fully-qualified, unquoted  */
+   else dsn = Userid()"."dsn           /* fully-qualified, unquoted  */
+
+   do forever
+      if memparm = "" then do
+         say " Enter BASE membername to be ALIASed:"
+         pull basenm aliasparm         /* get base member name       */
+         end
+      else parse value memparm with basenm memparm
+      if basenm  = "" then leave
+
+      if aliasparm = "" then do
+         say " Enter ALIASes to be assigned:"
+         pull aliasparm                /* get alias membernames      */
+         end
+      if aliasparm = "" then leave
+
+      do while aliasparm <> ""
+         parse var aliasparm aliasnm aliasparm    /* isolate         */
+         "DELETE '"dsn"("aliasnm")'"   /* delete alias               */
+                                       /* rename base->alias         */
+         "RENAME '"dsn"("basenm")' ("aliasnm") ALIAS"
+      end
+
+      if sw.0onepass then leave
+      parse value "" with aliasnm     basenm    /* re-init           */
+   end                                 /* forever (2nd lvl)          */
+
+   if sw.0onepass then leave
+   dsn = ""                            /* re-init                    */
+end                                    /* forever                    */
+exit                                   /*@ SETALIAS                  */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+parse source  sys_id  how_invokt  exec_name  .
+address TSO;"CLEAR"
+if helpmsg <> "" then say helpmsg; say ""
+ex_nam = Left(exec_name,8)             /* predictable size           */
+
+say "                                                                          "
+say "  "ex_nam"      creates aliases for members of a parttitioned dataset.    "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  basedsn basembr aliaslist>>               (Optional)"
+say "                                                                          "
+say "                                                                          "
+say "            basedsn   names the dataset whose members are to be aliased   "
+say "                                                                          "
+say "            basembr   names a member in 'basedsn' to be aliased           "
+say "                                                                          "
+say "            aliaslist identifies the aliases to be assigned to 'basembr'  "
+say "                      in 'basedsn'.  This may be a blank-delimited list of"
+say "                      aliases to be assigned in either the initial parm or"
+say "                      the response to the prompt.                         "
+say "                                                                          "
+say "            If all three elements are specified on the CALL, "ex_nam "will"
+say "            single-cycle.  If any (or all) are not specified on the call, "
+say "            "ex_nam" will prompt in line-mode for the missing information "
+say "            and will repeat prompting until a series of null responses    "
+say "            leaves it with no data to process.                            "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        TRACE tv  will use value following the literal 'TRACE' to place   "
+say "                  the execution in REXX TRACE Mode.                       "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        TSO "ex_nam"  parameters     ((  debug-options                    "
+say "                                                                          "
+say "   For example                                                            "
+say "                                                                          "
+say "        TSO "ex_nam"  (( TRACE ?R                                         "
+
+if sysvar("SYSISPF") = "ACTIVE" then,
+   address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

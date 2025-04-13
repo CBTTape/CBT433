@@ -1,0 +1,56 @@
+/* REXX    IDENT       changes the start-comment and end-mainline-comment
+                       to indicate the correct membername.
+*/
+address ISREDIT
+"MACRO (opts)"
+if rc = 20 then do                     /* ISREDIT not available      */
+   address TSO
+   parse source  .  .  exec_name .
+   ex_nam = Left(exec_name,8)          /* predictable size           */
+   helpmsg = ex_nam "is an EDIT macro"
+   say helpmsg
+   end
+parse var opts  parms "((" opts
+upper opts
+opts = Strip( opts,'T',')' )           /* yes we want no banans      */
+parse value ""  with  tv
+parse var opts "TRACE" tv .
+parse value tv "N" with tv .
+rc = Trace('O') ; rc = Trace(tv)
+
+"F 'REXX' FIRST"
+"(text) = LINE .zcsr"                  /* snapshot                   */
+
+if Left(text,2) <> '615c'x then,       /* not a comment -- BOOM      */
+   do
+   say "No REXX comment"
+   exit
+   end
+
+"(mbrnm) = MEMBER"
+parse var text 'REXX' tag .
+
+if tag <> "" then,
+   "C '"tag"'" mbrnm
+else do
+   "C 'REXX'  'REXX    @' "
+   "CURSOR =" .zcsr 1
+   "C '@'"  mbrnm
+   end
+
+"F '615c7c'x"                          /* slash asterisk yat         */
+"(text) = LINE .zcsr"                  /* snapshot                   */
+pta = Pos('615c7c'x,text) + 3
+ptb = Pos('5c61'x,text) - 2
+"C all p'=' ' ' " pta ptb .zcsr .zcsr  /* clean the comment area     */
+"CURSOR =" .zcsr 1                     /* reposition cursor          */
+repl = '615c7c'x mbrnm
+"F '615c7c'x"  .zcsr .zcsr
+"C * '"repl"'" .zcsr .zcsr             /* insert membername          */
+
+"CURSOR =" 1 1                         /* reposition cursor to l# 1  */
+"(text) = LINE .zcsr"                  /* snapshot                   */
+if Pos( '...',text ) > 0 then,
+   "F '...' "                          /* position to dots           */
+
+exit                                   /*@ IDENT                     */

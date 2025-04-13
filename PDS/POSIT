@@ -1,0 +1,6 @@
+/* REXX POSIT   position an edit session after EDBR                  */
+address ISREDIT
+"MACRO"
+address ISPEXEC "VGET (ebtl) SHARED"
+"Locate" ebtl
+return

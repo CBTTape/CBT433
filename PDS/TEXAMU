@@ -1,0 +1,7 @@
+/* rexx TBLOOK from a 3.4 M-list     */
+arg line
+fullds = Strip(line,,'"')
+parse var fullds  dsn  "("  mbr ")"
+address TSO
+"TBLOOK"  mbr "IN  '"dsn"'" "UPDATE"
+return

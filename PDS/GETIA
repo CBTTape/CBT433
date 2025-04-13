@@ -1,0 +1,60 @@
+/* REXX    GETIA     Scan a REXX routine for its 'Impact Analysis'
+                     section.  Extract each ddn/name pair, excluding
+                     anything that claims to be embedded.  Queue to the
+                     REXX stack <ddn elements>.
+.                    To turn tracing on (or off) in this macro, use
+                     SAYVAR to set MACTRACE to a proper object of
+                     'Trace()'.
+                       ex: ==> tso sayvar mactrace update( ?r )
+
+     Modification History
+     20230530 fxc use MACTRACE for tracing
+
+*/
+address ISREDIT
+"MACRO"
+address ISPEXEC "VGET  MACTRACE  "     /* use SAYVAR to set          */
+parse value mactrace "N" with tv .
+rc = Trace("O"); rc = Trace(tv)
+
+alphanum = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+parse value "" with,
+          ddnlist elems.   .
+
+"F 'Impact Analysis' FIRST"
+if rc > 0 then do; "CANCEL"; exit; end /* no IA section ?            */
+
+"(text) = LINE " .zcsr                 /* capture text               */
+parse var text front 'Impact Analysis' back
+if front''back <> "" then do           /* with other text            */
+   "CANCEL"
+   exit
+   end
+/* We are IN the IA section   */
+"(ln#,lc) = CURSOR"
+do forever                             /* all by itself              */
+   ln# = ln# + 1                       /* next line                  */
+   "(text) = LINE" ln#
+   if text = "" then leave             /* ran off the end            */
+   parse upper var text dot ddn elem othrtxt
+   if Verify(ddn,alphanum) > 0 then iterate
+   if Pos('BED',othrtxt) > 0 then iterate     /* (embedded) maybe?   */
+   if ddn = "(ALIAS)" then iterate
+   if WordPos(ddn,"SYSPROC SYSEXEC") > 0 then ddn = 'IAEXEC'
+   else,
+   if WordPos(ddn,"ISPPLIB        ") > 0 then ddn = 'IAPLIB'
+   else,
+   if WordPos(ddn,"ISPSLIB        ") > 0 then ddn = 'IASLIB'
+   if WordPos(ddn,ddnlist) = 0 then,
+      ddnlist = ddnlist ddn            /* new ddn                    */
+   elems.ddn = elems.ddn elem          /* add to element list        */
+end                                    /* forever                    */
+
+/* Send back one line for each DDN with its members.                 */
+do while(ddnlist <> "")
+   parse var ddnlist  ddn  ddnlist
+   queue ddn Space(elems.ddn,1)
+end
+"CANCEL"                               /* we're outahere             */
+
+exit                                   /*@ GETIA                     */

@@ -1,0 +1,114 @@
+/* REXX    STEPS      exposes all EXEC statements in JCL.
+           Use '(routine name)  ?' for HELP-text.
+
+     20071113 fxc handle lines with quoted strings;
+     20211028 fxc block error if called from TSO
+     20230726 fxc adjust HELP;
+
+*/
+address ISREDIT
+"MACRO (opts)"
+if rc = 20 then do                     /* ISREDIT not available      */
+   parse source  .  .  exec_name .
+   ex_nam = Left(exec_name,8)          /* predictable size           */
+   helpmsg = ex_nam "is an EDIT macro"
+   call HELP                           /* and don't come back        */
+   end
+upper opts
+parse var opts "TRACE" tv .
+parse value tv "N" with tv .
+rc=Trace("O"); rc = Trace(tv)
+if Wordpos("?",opts) > 0 then call HELP         /*                  -*/
+sw.0full = WordPos("TERSE",opts) = 0
+sw.0pgms = WordPos("PGM",opts) > 0
+
+address ISPEXEC "CONTROL ERRORS RETURN"
+"X ALL"
+
+if sw.0pgms then taglist = "EXEC"      /* programs only              */
+else do
+   taglist = "PROC EXEC"
+   "F ALL ' PROC '"
+   end                                 /*                            */
+"F ALL ' EXEC '"
+
+if sw.0full then do                    /* expand all                 */
+   "F FIRST '//' NX 1"
+   do forever
+      if rc > 0 then leave
+      "(txt) = LINE .zcsr"             /* acquire text               */
+      pt = Pos( "'",txt )
+      if pt > 0 then do
+         pt2 = Pos( "'",txt,pt+1 )
+         if pt2 > 0 then do
+            sluglen = pt2-pt-1
+            slug = Translate( Substr( txt,pt+1,sluglen),'3e'x,' ' )
+            txt  = Overlay( slug,txt,pt+1 )
+            end
+         end                           /* quoted string?             */
+      parse var txt front body rest
+      if Wordpos(body,taglist) > 0 then,
+         parse var rest body rest
+      if Left(front,3) = "//*" |,      /* comment                    */
+         Right(body,1) = "," then do   /* continuation               */
+         "(l#) = LINENUM .zcsr"
+         "XSTATUS" l#+1 "= NX"
+         if Left(front,3) = "//*" then,
+            "XSTATUS" l#   "= X"
+         end                           /* continuation               */
+      "F NEXT  '//' NX 1"
+   end                                 /* forever                    */
+   end                                 /* FULL                       */
+else do                                /* TERSE                      */
+   "F FIRST '//*' NX 1"
+   do forever
+      if rc > 0 then leave
+      "(txt) = LINE .zcsr"             /* acquire text               */
+      if Left(txt,3) = "//*" then,
+         "XSTATUS .zcsr  = X"
+      "F NEXT  '//*' NX 1"
+   end                                 /* forever                    */
+   end                                 /* TERSE                      */
+
+"F ALL ' PEND '"
+"F FIRST '//' 1 NX"                    /* position to top            */
+
+exit  1                                /*@ STEPS                     */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR" ; say
+parse source  .  .  exec_name .
+ex_nam = Left(exec_name,8)             /* predictable size           */
+if helpmsg <> "" then say helpmsg
+
+say "                                                                          "
+say "  "ex_nam"      exposes all PROC and EXEC statements in JCL.              "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  TERSE                                               "
+say "                      PGM                                                 "
+say "                                                                          "
+say "            TERSE     shows only the line containing the PROC or EXEC     "
+say "                      verb.  If TERSE is not specified, all lines         "
+say "                      associated with the PROC or EXEC verb are shown.    "
+say "                                                                          "
+say "            PGM       restricts the operation to EXEC verbs only.         "
+say "                                                                          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        TRACE tv  will use value following TRACE to place the execution   "
+say "                  into REXX TRACE Mode.                                   "
+say "                                                                          "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        TSO "ex_nam"  parameters     ((  debug-options                    "
+say "                                                                          "
+say "   For example                                                            "
+say "                                                                          "
+say "        TSO "ex_nam"  (( TRACE ?R                                         "
+
+if sysvar("SYSISPF") = "ACTIVE" then,
+address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

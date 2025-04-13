@@ -1,0 +1,21 @@
+/* REXX    SETEPROF     Build a standard ZDEFAULT edit profile.
+*/
+address ISREDIT
+"MACRO"
+"PROFILE ZDEFAULT"                     /* the master profile name    */
+"PROFILE UNLOCK"
+"AUTOLIST OFF"
+"AUTONUM OFF"
+"AUTOSAVE ON"
+"CAPS OFF"
+"HEX OFF"
+"IMACRO NONE"
+"NOTES OFF"
+"NULLS ON"
+"NUMBER OFF"
+"RECOVERY ON"
+"SETUNDO STG"
+"STATS ON"
+"HILITE OFF"
+"PROFILE LOCK"
+exit                                   /*@ SETEPROF                  */

@@ -1,0 +1,116 @@
+/*
+   Parse out the embedded components at the back of the source code.
+
+   The components are enclosed in a comment whose start and end are on
+   individual lines for easier recognition.
+
+   Each component is identified by a triple-close-paren ")))" in
+   column 1 followed by a DDName and a membername.  The text of the
+   component begins on the next line.
+
+   There are no restrictions on the DDName, but ISPF assets are treated
+   differently than non-ISPF material.  Items to be LIBDEFd should be
+   held to 4 character DDNs to accomodate the 'ISP' that will be
+   prepended.  Code is supplied below to properly LIBDEF ISPF elements.
+   Non-ISPF elements are not LIBDEFd but EXECIOd to a PO/80 dataset
+   named for the DDN specified.
+
+   Maintainers will also have to know that TOOLKIT_INIT is not the last
+   item in the source code.  It is STRONGLY RECOMMENDED that a
+   prominent notice be placed at the beginning of the code so that
+   future maintainers will be put immediately on notice that embedded
+   components exist.  The following may serve that purpose:
+
+   |**-***-***-***-***-***-***-***-***-***-***-***-***-***-***-***-**|
+   |                                                                 |
+   |          WARNING: EMBEDDED COMPONENTS.                          |
+   |                      See text following TOOLKIT_INIT            |
+   |                                                                 |
+   |**-***-***-***-***-***-***-***-***-***-***-***-***-***-***-***-**|
+
+.  ----------------------------------------------------------------- */
+DEIMBED: Procedure expose,             /*@                           */
+   (tk_globalvars)  ddnlist  @ddn.  daid.
+
+   address TSO
+
+   fb80po.0  = "NEW DELETE REU UNIT(SYSDA) SPACE(1 5) TRACKS DIR(40)",
+                   "RECFM(F B) LRECL(80) BLKSIZE(0)"
+   fb80po.1  = "SHR REU"
+   parse value ""   with  ddnlist @ddn.  daid.
+
+   lastln   = sourceline()
+   currln   = lastln                   /*                            */
+   if Left(sourceline(currln),2) <> "*/" then return
+
+   currln = currln - 1                 /* previous line              */
+   "NEWSTACK"
+   address ISPEXEC
+   do while sourceline(currln) <> "/*"
+      text = sourceline(currln)        /* save with a short name !   */
+      if Left(text,3) = ")))" then do  /* package the queue          */
+         parse var text ")))" ddn mbr .   /* PLIB PANL001  maybe     */
+         if length(ddn) > 4 then do    /* data, not ISPF             */
+            call DESPOOL               /*                           -*/
+            currln = currln - 1        /* previous line              */
+            iterate
+            end
+         if Pos(ddn,ddnlist) = 0 then do  /* doesn't exist           */
+            ddnlist = ddnlist ddn      /* keep track                 */
+            @ddn = ddn || Random(999)  /* PLIB322 maybe              */
+            @ddn.ddn = @ddn            /* @ddn.PLIB = PLIB322        */
+            address TSO "ALLOC FI("@ddn")" fb80po.0
+            "LMINIT DATAID(DAID) DDNAME("@ddn")"
+            daid.ddn = daid
+            end
+         daid = daid.ddn
+         "LMOPEN DATAID("daid") OPTION(OUTPUT)"
+         do queued()
+            parse pull line
+            "LMPUT DATAID("daid") MODE(INVAR) DATALOC(LINE) DATALEN(80)"
+         end
+         "LMMADD DATAID("daid") MEMBER("mbr")"
+         "LMCLOSE DATAID("daid")"
+         end                           /* package the queue          */
+      else push text                   /* onto the top of the stack  */
+      currln = currln - 1              /* previous line              */
+   end                                 /* while                      */
+   address TSO "DELSTACK"
+   return
+/*
+   Subroutine of DEIMBED for non-ISPF data.
+   Given: the stack, ddn, and mbr
+.  ----------------------------------------------------------------- */
+DESPOOL:                               /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   if WordPos( ddn,ddnlist ) = 0 then,
+      ddnlist = Space( ddnlist ddn,1 )
+   if Sysdsn(ddn".DATA") <> "OK" then,
+      "ALLOC FI("ddn") DA("ddn".DATA)" fb80po.0
+   "ALLOC FI("ddn") DA("ddn".DATA("mbr")) SHR REU"
+   "EXECIO" queued() "DISKW" ddn "(FINIS"
+   "DELSTACK"
+   "NEWSTACK"                          /* re-establish               */
+
+return                                 /*@ DESPOOL                   */
+
+return                                 /*@ DEIMBED                   */
+/*     This is how to setup the LIBDEFs                              */
+   dd = ""
+   do Words(ddnlist)                   /* each LIBDEF DD             */
+      parse value ddnlist dd  with  dd ddnlist
+      @ddn   = @ddn.dd                 /* PLIB322 <- PLIB            */
+      "LIBDEF  ISP"dd "LIBRARY  ID("@ddn") STACK"
+   end
+   ddnlist = ddnlist dd
+/*     This is how to drop the LIBDEFs                               */
+   dd = ""
+   do Words(ddnlist)                   /* each LIBDEF DD             */
+      parse value ddnlist dd  with  dd ddnlist
+      @ddn   = @ddn.dd                 /* PLIB322 <- PLIB            */
+      "LIBDEF  ISP"dd
+      address TSO "FREE  FI("@ddn")"
+   end
+   ddnlist = ddnlist dd

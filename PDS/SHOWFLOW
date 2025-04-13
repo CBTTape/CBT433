@@ -1,0 +1,182 @@
+/* REXX  SHOWFLOW    exposes only subroutine labels and references to
+                     them.  Labels which are not referenced by an
+                     invoking statement are marked to indicate this.
+
+           Written by Frank Clarke  rexxhead@yahoo.com
+
+     Impact Analysis
+.    SYSEXEC   TRAPOUT
+
+     Modification History
+     19990907 fxc labels are not found because of case-mismatch.
+     20000114 fxc verify label against symbolset
+     20230410 fxc Strip label after parse
+     20230622 fxc save label instead of first word; issue msg when label
+                  not found;
+     20230806 fxc chg SYSPROC to SYSEXEC in Impact Analysis;
+     20240728 fxc add HELP;
+     20240802 fxc 'exit 1' to place cursor in the command area;
+     20250304 fxc set default help panel;
+     20250329 fxc show comments ahead of subroutines; bypass via
+                  TERSE; upgrade HELP;
+
+*/
+address ISREDIT
+"MACRO ( opts )"
+sw. = 0
+upper opts                             /* shift to uppercase         */
+parse value " NO " with,               /* init value                 */
+            zerralrm  notfound  sublist helpmsg linelst
+sw.0monitor = Wordpos("MONITOR",opts) > 0
+sw.0doall   = Wordpos("ALL",opts) > 0
+sw.0terse   = Wordpos("TERSE",opts) > 0
+if WordPos( "?",opts ) > 0 then call HELP    /*                     -*/
+
+parse var opts "TRACE" tv .
+parse value tv "N"  with tv .
+rc = Trace("O"); rc = Trace(tv)
+
+x3b  = '3b'x
+symbolset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#_$.!?"x3b
+"(lastline) = LINENUM .zl"             /* bottom                     */
+if sw.0doall = "0" then do
+   "F 'LOCAL_PREINIT:'  1 FIRST "
+   if rc = 0 then,
+      "(lastline) = LINENUM .zcsr "    /* at LOCAL_...               */
+   end                                 /* doall                      */
+if sw.0monitor then say "Last-line set at" lastline
+
+lastline = lastline - 1
+do ii = 1 to lastline
+   "(text) = LINE" ii                  /* get the text               */
+   if text = "" then iterate
+   if Right(Word(text,1) ,1) = ":" then do
+      parse var text   label ":" .     /* must be 1st word...        */
+      upper label
+      label  = Strip( label )          /* maybe leading blanks       */
+      if Verify(label,symbolset) > 0 then iterate  /* not a label    */
+      if sw.0monitor then say,         /*                            */
+         "Label" label "found in >>"Strip(text)"<<"
+      if Wordpos(label,sublist) = 0 then do
+         sublist = sublist label       /* add to list of subrtns     */
+         linelst = linelst ii          /* keep track of its line#    */
+         if sw.0monitor then say label ii
+         end                           /* label not in sublist       */
+      end                              /* 1st word ends with colon   */
+end                                    /* ii                         */
+
+/* sublist is all the labels */
+if sw.0monitor then do
+   say "All the labels:"
+   say sublist
+   say linelst
+   end
+
+rc = trace('O'); rc = trace(tv)
+push     '61'x    '5c'x    '6b'x     '7d'x     '7f'x       '4d'x
+pull     slash    star     comma     singleq   doubleq     bananal
+
+"X ALL"
+upper sublist                          /* all uppercase              */
+do ii = 1 to Words(sublist)            /* for every subroutine       */
+   subr = Word(sublist,ii)             /* isolate                    */
+   loc = "FIRST" ; sw.0found = "0"
+   do forever
+      "F" subr "WORD" loc
+      loc = "NEXT"
+      if rc > 0 then leave
+      if sw.0found then iterate
+      "(text) = LINE .zcsr"
+      upper text                       /* all uppercase              */
+      do while Pos( subr,text ) > 0
+         parse var text front (subr) back
+         sepr = Left(back,1)        /* char immed following subr  */
+         if sepr = bananal then sw.0found = '1'
+         else do
+            front = Reverse(front)
+            sw.0found = Wordpos("LLAC",front) > 0,
+                      | Wordpos("NO",front) > 0 ,
+                      | Wordpos("LANGIS",front) > 0
+            end                     /* sepr ¬= banana             */
+         if sw.0found then text = ""   /* halt the loop              */
+                      else text = back /* do it again                */
+      end                              /* Pos(subr                   */
+   end                                 /* forever                    */
+   if sw.0found = "0" then do          /* no CALLs !                 */
+      "F" subr "WORD FIRST"
+      notfound = notfound subr
+      parse var sublist front (subr) back
+      sublist  = front 'ea'x  back     /* excise bad subr            */
+      front    = SubWord( linelst,1,ii-1 )
+      back     = SubWord( linelst,ii+1   )
+      linelst  = front 'ea'x back
+      msg =    "The following subroutine",
+               "("subr")",
+               "is not otherwise referenced:"
+      "LINE_BEFORE .zcsr = NOTELINE (msg) "
+      end
+end                                    /* ii                         */
+
+if sw.0terse = 0 then,
+/* Expose the comment before each found label                        */
+do zz = 1 to Words( linelst )
+   line   = Word( linelst,zz )
+   if line = 'ea'x then iterate
+   do until Pos( '/*',text ) = 1       /* start of comment           */
+      line = line - 1
+      "(text)  = LINE" line            /* acquire text               */
+      "XSTATUS" line "= NX"            /* expose                     */
+   end                                 /* comment                    */
+end                                    /* linelst                    */
+
+if notfound <> "" then do
+   zerrhm  = "ISR00000"
+   zerrsm  = ''
+   zerrlm  = "The following labels were not found as labels:",
+             Space( notfound,2 )
+   address ISPEXEC
+   "SETMSG  MSG( ISRZ002 ) "
+   end                                 /* notfound                   */
+address ISREDIT
+"UP MAX"
+
+exit 1                                 /*@ SHOWFLOW                  */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR"
+   parse source  sys_id  how_invokt  exec_name  DD_nm  DS_nm,
+                     as_invokt  cmd_env  addr_spc  usr_tokn
+if helpmsg <> "" then say helpmsg
+ex_nam = Left(exec_name,8)             /* predictable size           */
+
+say "                                                                          "
+say "  "ex_nam"      reveals all labels and references in REXX code.  It is    "
+say "                optimized for REXXSKEL-based code, but will work          "
+say "                adequately for others.                                    "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  ALL                                                 "
+say "                      MONITOR                                             "
+say "                      TERSE                                               "
+say "                      TRACE    tv                                         "
+say "                                                                          "
+say "            ALL       causes all labels to be exposed.  The default       "
+say "                      operation is to ignore labels that appear later than"
+say "                      LOCAL_PREINIT.  This can occasionally produce       "
+say "                      confusing messages.                                 "
+say "                                                                          "
+say "            MONITOR   causes diagnostic messages to be issued during      "
+say "                      processing.                                         "
+say "                                                                          "
+say "            TERSE     is the prior default process.  If not specified,    "
+say "                      "ex_nam" also displays the canonical comments ahead "
+say "                      of each subroutine.                                 "
+say "                                                                          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "                                                                          "
+say "            tv        if specified as the operand of TERSE, places the    "
+say "                      execution into REXX TRACE for that value.           "
+
+if sysvar("SYSISPF") = "ACTIVE" then,
+   address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

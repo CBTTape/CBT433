@@ -1,0 +1,298 @@
+/* REXX    COMMANDS   Show the contents of xxxCMDS and allow
+                      selection and parameter entry.
+   |**-***-***-***-***-***-***-***-***-***-***-***-***-***-***-***-**|
+   |                                                                 |
+   |          WARNING: EMBEDDED COMPONENTS.                          |
+   |                                                                 |
+   |**-***-***-***-***-***-***-***-***-***-***-***-***-***-***-***-**|
+
+           Written by Frank Clarke  rexxhead@yahoo.com in the Dark Ages
+
+     Impact Analysis
+.    ...       ...
+
+     Modification History
+     20230608 fxc use &ZUP/&ZCONT
+     20240305 fxc align panel names;
+     20240308 fxc chg dollar-sign to @ everywhere;
+
+*/ arg argline
+address TSO
+parse value "0"   with,
+            sw.   tv  @tn@  @ddn  @ddn.  action  zctact
+arg line
+exec_name = Sysvar(Sysicmd)
+if Sysvar(sysispf) = "NOT ACTIVE" then do
+   line = line "((  RESTARTED"         /* tell the next invocation   */
+   address TSO
+   "ISPSTART CMD("exec_name line")"    /* Invoke ISPF if nec.    */
+   exit                                /* ...and restart it          */
+   end
+restarted = WordPos("RESTARTED",opts)>0/* called from READY-mode ?   */
+
+arg parms "((" opts
+if parms = "?" then call HELP
+opts = Strip(opts,"T",")")             /* lop trailing banana        */
+
+parse var opts "TRACE" tv .
+parse value tv "N"  with tv .          /* guarantee a value          */
+rc = Trace("O"); rc = Trace(tv)
+
+parse value parms "ISP"   with  cmdtblID .
+@tn@ = cmdtblID"CMDS"                  /* ISPCMDS by default         */
+call T_TBOPEN                          /*                           -*/
+
+address ISPEXEC
+"CONTROL ERRORS RETURN"
+
+call DEIMBED                           /* extract panel CMDSP       -*/
+@ddn = @ddn.PLIB
+"LIBDEF  ISPPLIB  LIBRARY  ID("@ddn") STACK"
+
+do forever
+   "TBDISPL" @tn@ "PANEL(CMDSP) CURSOR(ACTION) AUTOSEL(NO)"
+   if rc > 4 then leave
+   do ztdsels
+      select
+         when action = "S" then do     /* Select                     */
+            "CONTROL DISPLAY SAVE"     /* in case we display s'thing */
+            (zctact)
+            "CONTROL DISPLAY RESTORE"  /* return from display        */
+            end
+         when WordPos(action,"D") > 0 then do
+            "CONTROL DISPLAY SAVE"     /* in case we display s'thing */
+            "TBDELETE" @tn@
+            if rc = 0 then sw.0chgd = 1
+            else do
+               "SETMSG MSGID(ISRZ002)"
+               leave
+            "CONTROL DISPLAY RESTORE"  /* return from display        */
+               end
+            end                        /* delete                     */
+         when WordPos(action,"E B") > 0 then do
+            "CONTROL DISPLAY SAVE"     /* in case we display s'thing */
+            call F_FIXTBL              /*                           -*/
+            "CONTROL DISPLAY RESTORE"  /* return from display        */
+            end
+         otherwise nop
+      end                              /* Select                     */
+      if ztdsels = 1 then,             /* never do the last one      */
+         ztdsels = 0
+      else "TBDISPL" @tn@              /* next row                   */
+   end                                 /* ztdsels                    */
+   action = ""                         /* clear for re-display       */
+end                                    /* forever                    */
+"LIBDEF  ISPPLIB"
+if sw.0error_found then exit           /* POOF!                      */
+if sw.0chgd then do                    /* table was changed          */
+   call W_WRITE_TABLE                  /*                           -*/
+   end                                 /* sw.0chgd                   */
+
+if restarted then do
+   @@ = OutTrap("ll.")
+   exit 4
+   end
+exit                                   /*@ COMMANDS                  */
+/*
+   Solicit changes and apply them to the table.
+.  ----------------------------------------------------------------- */
+F_FIXTBL:                              /*@                           */
+   address ISPEXEC
+
+   save. = ""
+   parse value zctverb zcttrunc zctact   with ,
+               save.vb save.tr  save.act
+   save.desc = zctdesc
+   do forever
+      "DISPLAY  PANEL(CMDFIX)"
+      if rc > 8 then do
+         "SETMSG MSGID(ISRZ002)"
+         leave
+         end
+      else,
+      if rc = 8 then leave             /* PF3                        */
+   end
+   if save.vb    = zctverb   then,
+   if save.tr    = zcttrunc  then,
+   if save.act   = zctact    then,
+   if save.desc  = zctdesc   then return
+   "TBMOD" @tn@
+
+return                                 /*@ F_FIXTBL                  */
+/*
+   TBOPEN the selected table.
+.  ----------------------------------------------------------------- */
+T_TBOPEN:                              /*@                           */
+   address ISPEXEC
+
+   "LIBDEF  ISPTLIB  LIBRARY  ID(ISPTLIB)  STACK"
+   "TBSTATS" @tn@ "STATUS1(s1) STATUS2(s2)"
+   if s1 > 1 then do
+      say "Table" @tn@ "not available."
+      zerrsm = "Table" @tn@ "not available."
+      zerrlm = "Table" @tn@ "not found in the ISPTLIB library chain"
+      sw.0error_found = "1"; return
+      end; else,
+   if s2 = 1 then do                   /* table is not open          */
+      "TBOPEN "   @tn@   "WRITE"
+      if rc > 4 then do
+         sw.0error_found = 1
+         zerrsm = "Table did not OPEN"
+         zerrlm = "Table" @tn@ "cannot be opened due to prior",
+                  "enqueues."
+         "SETMSG  MSG(ISRZ002)"
+         end
+      end
+   else "TBTOP" @tn@
+   "LIBDEF  ISPTLIB"
+   if sw.0error_found then exit        /*                            */
+
+return                                 /*@ T_TBOPEN                  */
+/*
+.  ----------------------------------------------------------------- */
+W_WRITE_TABLE:                         /*@                           */
+   address ISPEXEC
+
+   "LIBDEF  ISPTABL  LIBRARY  ID(ISPTABL)  STACK"
+   "TBCLOSE" @tn@                      /* write it                   */
+   "LIBDEF  ISPTABL"
+
+return                                 /*@ W_WRITE_TABLE             */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+say "HELP for" Sysvar(Sysicmd) "not available"
+exit                                   /*@ HELP                      */
+/*
+   Parse out the embedded components at the back of the source code.
+.  ----------------------------------------------------------------- */
+DEIMBED: Procedure expose,             /*@                           */
+   ddnlist  @ddn.  daid.
+
+   address TSO
+
+   fb80po.0  = "NEW DEL UNIT(VIO) SPACE(5 5) TRACKS DIR(40)",
+                   "RECFM(F B) LRECL(80) BLKSIZE(0)"
+   parse value ""   with  ddnlist @ddn.  daid.
+
+   lastln   = sourceline()
+   currln   = lastln                   /*                            */
+   if Left(sourceline(currln),2) <> "*/" then return
+
+   currln = currln - 1                 /* previous line              */
+   "NEWSTACK"
+   address ISPEXEC
+   do while sourceline(currln) <> "/*"
+      text = sourceline(currln)        /* save with a short name !   */
+      if Left(text,3) = ")))" then do  /* package the queue          */
+         parse var text ")))" ddn mbr .   /* PLIB PANL001  maybe     */
+         if Pos(ddn,ddnlist) = 0 then do  /* doesn't exist           */
+            ddnlist = ddnlist ddn      /* keep track                 */
+            @ddn = ddn || Random(999)
+            @ddn.ddn = @ddn
+            address TSO "ALLOC FI("@ddn")" fb80po.0
+            "LMINIT DATAID(DAID) DDNAME("@ddn")"
+            daid.ddn = daid
+            end
+         daid = daid.ddn
+         "LMOPEN DATAID("daid") OPTION(OUTPUT)"
+         do queued()
+            parse pull line
+            "LMPUT DATAID("daid") MODE(INVAR) DATALOC(LINE) DATALEN(80)"
+         end
+         "LMMADD DATAID("daid") MEMBER("mbr")"
+         "LMCLOSE DATAID("daid")"
+         end                           /* package the queue          */
+      else push text                   /* onto the top of the stack  */
+      currln = currln - 1              /* previous line              */
+   end                                 /* while                      */
+   address TSO "DELSTACK"
+
+return                                 /*@ DEIMBED                   */
+/*
+))) PLIB     CMDSP     ..
+)ATTR
+  % TYPE( TEXT   ) INTENS( HIGH ) SKIP( ON )
+  + TYPE( TEXT   ) INTENS( LOW  ) SKIP( ON )
+  _ TYPE( INPUT  ) INTENS( HIGH )            CAPS( ON  )
+  ! TYPE( OUTPUT ) INTENS( HIGH ) SKIP( ON )
+)BODY EXPAND(||) WIDTH(&ZSCREENW)
+%|-| Current Command Table Contents |-|
+%COMMAND ===>_ZCMD                                            %SCROLL ===>_AMT +
++
++    CmdName    CmdDescription
+)MODEL
+_Z+ !ZCTVERB + !ZCTDESC
+)INIT
+  .ZVARS = '(ACTION)'
+  .HELP  = CMDSPH
+)REINIT
+  IF (&MSG = ' ')
+     &ACTION = ' '
+     REFRESH (&ACTION)
+)END
+))) PLIB     CMDSPH    ..
+)ATTR
+  % TYPE( TEXT   ) INTENS( HIGH ) SKIP( ON )
+  + TYPE( TEXT   ) INTENS( LOW  ) SKIP( ON )
+  _ TYPE( INPUT  ) INTENS( HIGH )
+  ! TYPE( OUTPUT ) INTENS( HIGH ) SKIP( ON )
+  @ TYPE( OUTPUT ) INTENS( LOW  ) SKIP( ON )
+)BODY EXPAND(||) WIDTH(&ZSCREENW)
+%TUTORIAL |-| Current Command Table Contents |-| TUTORIAL
+%Next Selection ===>_ZCMD
+
++
+     Enter%S+to execute the command.
++
+     Enter%E+or%B+to Edit or Browse the specific entry
++
+     Enter%D+to delete the command table entry.
+)PROC
+   &ZUP   = CMDSPH
+   &ZCONT = CMDSPH
+)END
+))) PLIB     CMDFIX    ..
+)ATTR
+  % TYPE( TEXT   ) INTENS( HIGH ) SKIP( ON )
+  + TYPE( TEXT   ) INTENS( LOW  ) SKIP( ON )
+  _ TYPE( INPUT  ) INTENS( HIGH )            CAPS( ON  )
+  } TYPE( INPUT  ) INTENS( HIGH )            CAPS( OFF )
+  ! TYPE( OUTPUT ) INTENS( HIGH ) SKIP( ON )
+)BODY EXPAND(||) WIDTH(&ZSCREENW)
+%|-| Current Command Table Line Contents |-|
+%COMMAND ===>_ZCMD
+                                                              %SCROLL ===>_AMT +
++
++        Verb ===>_zctverb +
+
++  Truncation ===>_z+
+
++      Action ===>_zctact
+
++ Description ===>}zctdesc
+
+)INIT
+  .ZVARS = '(ZCTTRUNC)'
+  .HELP  = CMDFIXH
+)PROC
+)END
+))) PLIB     CMDFIXH   ..
+)ATTR
+  % TYPE( TEXT   ) INTENS( HIGH ) SKIP( ON )
+  + TYPE( TEXT   ) INTENS( LOW  ) SKIP( ON )
+  _ TYPE( INPUT  ) INTENS( HIGH )
+  ! TYPE( OUTPUT ) INTENS( HIGH ) SKIP( ON )
+  @ TYPE( OUTPUT ) INTENS( LOW  ) SKIP( ON )
+)BODY EXPAND(||) WIDTH(&ZSCREENW)
+%TUTORIAL |-| Line Contents |-| TUTORIAL
+%Next Selection ===>_ZCMD
+
++
+      Make whatever changes are needed, press%Enter+
+%     PF3+to set the changes.
+)PROC
+   &ZUP   = CMDFIXH
+   &ZCONT = CMDFIXH
+)END
+*/

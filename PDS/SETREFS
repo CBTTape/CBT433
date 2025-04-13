@@ -1,0 +1,166 @@
+/* REXX    SETREFS    Builds backward references for datasets in a
+                      catalogued procedure or in JCL.
+
+                      When rigged to modify the PROC JCL, this routine
+                      can be run repeatedly without danger and (in
+                      fact) should be run twice to pick up any
+                      incorrect existing backward references.
+           Use '(routine name)  ?' for HELP-text.
+
+           Written by Frank Clarke  rexxhead@yahoo.com
+
+     Impact Analysis
+.    SYSEXEC   TRAPOUT
+
+     Modification History
+     20230726 fxc adjust HELP;
+     20230806 fxc chg SYSPROC to SYSEXEC in Impact Analysis;
+     20240308 fxc chg dollar-sign to @ everywhere;
+
+*/
+address ISREDIT
+"MACRO (opts)"
+if rc > 0 then do
+   helpmsg = "SETREFS is an edit macro; are you in EDIT?"
+   call HELP
+   end
+upper opts
+parse var opts "TRACE" tv .            /* was TRACE specified?       */
+parse value tv "N" with tv .
+rc = Trace("O"); rc = Trace(tv)
+if WordPos("?",opts) > 0 then call HELP /*                          -*/
+sw.0insert = Wordpos("INSERT",opts) > 0
+
+parse value "0 0 0 0 0 0 0 0 0 0 " with,
+            st#   log#  concat.  .
+parse value "" with step.  log.  workddn  altdsn.
+
+"X ALL"
+"F ALL '//' 1"                         /* JCL only                   */
+"X ALL '//*' 1 "                       /* no comments                */
+"CURSOR = 1 0 "
+do forever
+   "F P'¬' 1  NX"                      /* non-blank in 1             */
+   if rc > 0 then leave
+   "(text) = LINE    .zcsr"            /* carpe textem               */
+   "(L#)   = LINENUM .zcsr"            /* ...and the line number     */
+   if Wordpos("EXEC",text) > 0 then do /* acquire stepname           */
+      parse var text "//" stepnm .
+      st# = st# + 1
+      end ; else,                      /* EXEC                       */
+   if Wordpos("DD",text) > 0 then do   /* acquire dsname             */
+      parse var text p1 p2 p3 .        /* //ddname dd disp=...       */
+
+      parse var p1 "//" ddname .       /* What if it's concatenated? */
+      if ddname = "" then,
+         parse value '1' workddn  with  concat.l# ddname  .
+      workddn = ddname                 /* last used ddname           */
+      if WordPos(ddname,"STEPLIB SORTLIB") > 0 then iterate
+      if Abbrev(ddname,"SORTWK") then iterate
+
+      do while Right(p3,1) = ","       /* continued line             */
+         "F P'¬' 1 NX"                 /* next line                  */
+         if rc > 0 then do
+            say "Unexpected end of source while searching for",
+                "end-of-statement."
+            leave
+            end
+         "(text) = LINE .zcsr"         /* carpe textem               */
+         parse var text  .  p3a  .
+         p3 = p3 || p3a                /* no spaces between          */
+      end                              /* while                      */
+
+      parse var p3 "DSN=" dsn ","
+      if dsn = "" then iterate
+      if Pos("*.",dsn) > 0 then iterate
+
+      key = "*."stepnm"."ddname
+                                       /* log all this information   */
+      parse value log#+1 st# stepnm   ddname dsn key L#  with,
+                  @log  log.@log    1 log#   .
+      end                              /* DD                         */
+end                                    /* forever                    */
+                                        rc = Trace("O"); rc = Trace(tv)
+do zz = 1 to log#                      /* every log entry            */
+   parse var log.zz  st#  stepnm  ddname  dsn  key  L#  .
+   if altdsn.dsn <> "" then,           /* last-known use of dsn      */
+      if step.dsn <> stepnm then,      /* ...in a different step     */
+         dataid = altdsn.dsn"("dsn")"  /* show backward ref          */
+      else dataid = dsn
+   else dataid = dsn
+
+   slug   = Right(st#,3) stepnm /* 12 */
+   if Length(slug) < 12 then slug = Left(slug,12)
+   slug   = slug ddname
+   if Length(slug) < 30 then slug = Left(slug,30)
+   log.zz = slug dataid "("L#")"
+
+                /* Mark this 'the last use of this DSN'              */
+   altdsn.dsn = key                    /* attach key to dsn          */
+   step.dsn   = stepnm                 /* attach ddname to dsn       */
+end                                    /* zz                         */
+                                        rc = Trace("O"); rc = Trace(tv)
+if sw.0insert then do                  /* insert notelines           */
+   do zz = log# to 1 by -1             /* from the bottom            */
+      parse var log.zz  st# stepnm ddn dataid l# .
+      if Left(dataid,2) = "*." then do /* referback                  */
+         parse var L#  "(" l#  ")"
+         parse var dataid refbk "("
+         if concat.l# then ddn = ""    /* was originally blank       */
+         slug  = "//"ddn
+         if Length(slug) < 11 then slug = Left(slug,11)
+         refbk = slug "DD DSN="refbk","
+         "LINE_BEFORE" L# "= NOTELINE (refbk)"
+         end                           /* referback                  */
+   end                                 /* zz                         */
+   end                                 /* INSERT                     */
+else do                                /* list                       */
+   address TSO
+   "ALLOC FI(@TMP) UNIT(VIO) SPACE(1 1) TRACKS",
+                  "NEW REU RECFM(V B) LRECL(180) BLKSIZE(0)"
+   "EXECIO" log# "DISKW @TMP (STEM LOG. FINIS"
+
+   address ISPEXEC
+   "LMINIT DATAID(@ED) DDNAME(@TMP)"
+   "EDIT   DATAID("@ed")"
+   "LMFREE DATAID("@ed")"
+   end                                 /* not INSERT                 */
+
+exit                                   /*@ SETREFS                   */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+parse source sys_id how_invokt exec_name   .
+address TSO;"CLEAR"
+ex_nam = Left(exec_name,8)             /* predictable size           */
+
+say "                                                                          "
+say "  "ex_nam"      inserts backward references to JCL jobstreams.            "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  INSERT                                              "
+say "                                                                          "
+say "            INSERT    directs "exec_name" to insert NOTELINEs showing     "
+say "                      suggested changes to the JCL.  To accept a change,  "
+say "                      enter 'MD' (Make Data) on the NOTELINE and delete   "
+say "                      the original text.                                  "
+say "                                                                          "
+say "                      The default action (in the absence of 'INSERT') is  "
+say "                      to analyze the JCL and report.                      "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "                                                                          "
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        TRACE tv  will use value following TRACE to place the execution in"
+say "                  REXX TRACE Mode.                                        "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        " ex_nam "    parameters                                          "
+say "                                                                          "
+say "   For example                                                            "
+say "                                                                          "
+say "        " ex_nam " TRACE ?R                                               "
+
+if sysvar("SYSISPF") = "ACTIVE" then,
+address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

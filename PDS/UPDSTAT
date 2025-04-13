@@ -1,0 +1,60 @@
+/* REXX    UPDSTAT    Update the stats
+
+           Written by G052811 Chris Lewis 950802
+
+     Modification History
+     20211020 fxc check format of 'cre' and 'chg', and reformat as
+                  needed.
+     20241107 fxc allow 8-character userids;
+
+*/
+address ISPEXEC
+arg memname dataset vv mm cre chg time size init mod id .
+call R_REFORM                          /* reformat cre and chg      -*/
+
+"CONTROL ERRORS RETURN"
+
+ "LMINIT    DATAID(BASEID)   DATASET('"dataset"')"
+ if rc > 0 then return(rc)
+
+ "LMMSTATS DATAID("baseid")" "MEMBER("memname")",
+                         "VERSION("vv")" "MODLEVEL("mm")",
+                         mslug cslug,
+                         "MODTIME("time")" "CURSIZE("size")",
+                         "INITSIZE("init")" "MODRECS("mod")",
+                         "USER8("id")"
+ stat_rc = rc
+
+ "LMFREE     DATAID("baseid")"
+
+return(stat_rc)                        /*@ UPDSTAT                   */
+/*
+   For each of cre and chg: if slashes are not present, alter format
+   to that required by LMMSTATS, either ccyy/mm/dd/ or yy/mm/dd.
+.  ----------------------------------------------------------------- */
+R_REFORM:                              /*@                           */
+   address TSO
+
+   parse value "" with cslug mslug
+   if Pos( "/",cre ) > 0 then,
+      if length( cre ) > 8 then,       /* CCYY/MM/DD                 */
+         cslug = "CREATED4("cre")"
+      else cslug = "CREATED("cre")"    /* YY/MM/DD                   */
+   else,                               /* no slashes!                */
+      if Length(cre) > 6 then,         /* CCYY/MM/DD                 */
+         cslug = "CREATED4("Translate('CcYy/Mm/Dd',cre,'CcYyMmDd')")"
+      else
+         cslug = "CREATED("Translate('Yy/Mm/Dd',cre,'YyMmDd')")"
+
+   mslug = ""
+   if Pos( "/",chg ) > 0 then,
+      if length( chg ) > 8 then,       /* CCYY/MM/DD                 */
+         mslug = "MODDATE4("chg")"
+      else mslug = "MODDATE("chg")"    /* YY/MM/DD                   */
+   else,                               /* no slashes!                */
+      if Length(chg) > 6 then,         /* CCYY/MM/DD                 */
+         mslug = "MODDATE4("Translate('CcYy/Mm/Dd',chg,'CcYyMmDd')")"
+      else
+         mslug = "MODDATE("Translate('Yy/Mm/Dd',chg,'YyMmDd')")"
+
+return                                 /*@ R_REFORM                  */

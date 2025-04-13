@@ -1,0 +1,26 @@
+/* REXX       FIXTBL    Direct access to ISPF 3.9
+*/
+arg appid .
+if appid = "?" then call HELP          /*                           -*/
+parse value appid "TMP"  with  appid  .
+address ISPEXEC
+"SELECT PGM(ISPUCM) PARM("appid")"
+exit
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR"
+
+ex_nam = "FIXTBL  "
+
+say "  "ex_nam"      provides direct access to command tables for display and  "
+say "                update.                                                   "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  app-id                                    (Defaults)"
+say "                                                                          "
+say "            app-id    is the 3- or 4-byte prefix for the table.  If not   "
+say "                      specified, it defaults to 'TMP'.                    "
+say "                                                                          "
+if sysvar("SYSISPF") = "ACTIVE" then,
+   address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

@@ -1,0 +1,95 @@
+/* REXX    ISOLATE    Place your cursor on a word and issue "ISOLATE".
+                      Everything will be excluded except all occurrences
+                      of the word.
+*/
+address ISREDIT
+"MACRO (opts)"
+if rc = 20 then do                     /* ISREDIT not available      */
+   parse source  .  .  exec_name .
+   ex_nam = Left(exec_name,8)          /* predictable size           */
+   helpmsg = ex_nam "is an EDIT macro"
+   call HELP                           /* and don't come back        */
+   end
+upper opts
+parse var opts  parms "((" opts
+parse var opts "TRACE" tv .
+parse value tv 'N'  with  tv  .
+rc = Trace("O") ; rc = Trace(tv)
+
+if WordPos( "?",parms ) > 0 then call HELP
+
+call A_INIT
+
+"(wrow,wcol) = CURSOR"                 /* where am I ?               */
+wcol = Max(wcol,1)
+"(text)      = LINE .zcsr"             /* seize text                 */
+
+text  = Translate(text," ","(.,=+-/;*:)")
+
+pt = LastPos(" ",Left(text,wcol))      /* preceding blank            */
+pt   = Max(pt  ,1)
+text = Substr(text,pt)                 /* snip                       */
+parse var text      lookfor .          /* find the word to look for  */
+
+"X ALL"
+"F ALL '"lookfor"'" findmode
+
+exit                                   /*@ ISOLATE                   */
+/*
+.  ----------------------------------------------------------------- */
+A_INIT:                                /*@                           */
+   address ISPEXEC
+
+   parse value "0" with,
+               sw.  ,
+               @isoprm   t1  tv   .
+   "VGET @ISOPRM "
+   argln = parms @isoprm
+   sw.0word = WordPos( "WORD",parms ) = 1
+   sw.0str  = WordPos( "STR" ,parms ) = 1
+
+   @isoprm = ""
+   if sw.0word then @isoprm = "WORD"
+   if sw.0str  then @isoprm = "STR"
+   "VPUT @ISOPRM PROFILE"
+   if sw.0word then findmode = "WORD"
+               else findmode =
+
+return                                 /*@ A_INIT                    */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR"
+if helpmsg <> "" then say helpmsg
+ex_nam = Left(exec_name,8)             /* predictable size           */
+
+say "                                                                          "
+say "  "ex_nam"      will find the word/string at the cursor location,         "
+say "                excluding all other text.  'WORD' or 'STR' is remembered  "
+say "                from the prior execution and stays set until it is reset. "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  WORD | STR                                          "
+say "                                                                          "
+say "            WORD      the isolated string is found wherever it is a       "
+say "                      delimited word.                                     "
+say "                                                                          "
+say "            STR       the isolated string is found wherever it exists.    "
+say "                                                                          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        TRACE tv: will use value following TRACE to place the execution   "
+say "                  into REXX TRACE Mode.                                   "
+say "                                                                          "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        TSO "ex_nam"  parameters     ((  debug-options                    "
+say "                                                                          "
+say "   For example:                                                           "
+say "                                                                          "
+say "        TSO "ex_nam"  (( TRACE ?R                                         "
+
+if sysvar("SYSISPF") = "ACTIVE" then,
+   address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

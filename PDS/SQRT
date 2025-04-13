@@ -1,0 +1,50 @@
+/* REXX       SQRT        deliver the square root of the given number.
+                          If nested PUSH onto queue, else SAY.
+
+     Modification History
+     20211121 fxc eliminate extraneous trailing zeroes (and if
+                     necessary) trailing decimal point;
+     20250312 fxc wrap with SHORTRX; enable tracing; check DIFF vs
+                  ABS(lastdiff); if nested, PUSH root;
+     20250325 fxc must keep check for diff = lastdiff;
+
+*/ arg argline                         /* pro-forma quick-start      */
+address TSO
+arg parms "((" opts
+opts = Strip(opts,"T",")")
+parse var opts "TRACE"  tv  .
+parse value tv "N"  with  tv .
+rc = Trace("O"); rc = Trace(tv)
+
+/* REXX external subroutine computes square roots.
+
+   Original by (probably) Robin Ryerse
+
+.  ----------------------------------------------------------------- */
+SQRT:                                  /*@                           */
+parse var parms  nbr  .
+deflt  = Digits()
+parse var nbr whole "." frac
+if \Datatype(whole,"W") then whole = 0
+if \Datatype(frac ,"W") then frac  = 0; else frac = "."frac
+if Length(whole)//2 = 0 then parse var whole base 3 tail
+                        else parse var whole base 2 tail
+root = (base/2) * (10**(Length(tail)%2)) + frac
+numeric digits 12
+lastdiff = 0
+do forever
+   diff = nbr - root**2
+   if diff = 0 then leave
+   if diff =      lastdiff   then leave
+   if diff = ABS( lastdiff ) then leave
+   lastdiff = diff
+   root  =  root + ((diff/2) /root)
+end
+numeric digits deflt
+root = root + 0
+root = Strip( root,"T","0" )
+root = Strip( root,"T","." )
+if Sysvar("Sysnest") = "NO" then say root; else,
+push   root                            /*@ SQRT                      */
+
+exit                                   /*@ SQRT                      */

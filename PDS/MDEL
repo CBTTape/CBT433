@@ -1,0 +1,29 @@
+/* REXX     MDEL     Delete a member
+                     Syntax:  MDEL  member1 ... membern
+                     MDEL  --MUST-- be called from a command table
+                     entry with ZCTACT of
+          SELECT CMD(MDEL |&zdsn |&zmem |&zmemb |&zparm)
+
+*/ arg argline                         /* pro-forma quick-start      */
+address TSO
+arg parms "((" opts
+opts = Strip(opts,"T",")")
+parse var opts "TRACE"  tv  .
+parse value tv "N"  with  tv .
+rc = Trace("O"); rc = Trace(tv)
+
+dlm = Left(parms,1)
+parse var parms  (dlm) zdsn . (dlm) ma (dlm) mb (dlm) delmem
+if delmem = "" then do
+   say "Syntax error: Must specify a member to be deleted."
+   exit
+   end                                 /* newmem blank               */
+
+msgstate = Msg("OFF")
+do Words(delmem)                       /* each member                */
+   parse var delmem mbr delmem
+   "PDS  '"zdsn"'  DELETE"  mbr
+end                                    /* delmem                     */
+zz = Msg(msgstate)
+
+exit                                   /*@ MDEL                      */

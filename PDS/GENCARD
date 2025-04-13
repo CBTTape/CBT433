@@ -1,0 +1,295 @@
+/* REXX    GENCARD    Accept text in parms, write it onto file @OUT
+                      stripped, but otherwise as-is.
+           Use '(routine name)  ?' for HELP-text.
+
+     Written by Frank Clarke (DTCFXC1) rexxhead@yahoo.com 1989-05-05
+
+     Impact Analysis
+.    SYSEXEC   TRAPOUT
+
+     Modification History
+     20010502 fxc upgrade from v.19980225 to v.19991109; update HELP
+                  text;
+     20230510 fxc HELP if text is empty
+     20230726 fxc adjust HELP;
+     20230806 fxc chg SYSPROC to SYSEXEC in Impact Analysis;
+     20240308 fxc chg dollar-sign to @ everywhere;
+     20240415 fxc DUMP_QUEUE quiet;
+
+*/ arg argline
+address TSO                            /* REXXSKEL ver.19980225      */
+arg parms "((" opts
+
+signal on syntax
+signal on novalue
+
+call TOOLKIT_INIT                      /* conventional start-up     -*/
+rc     = trace(tv)
+info   = parms                         /* to enable parsing          */
+
+if info = "" then do
+   helpmsg = "Input text may not be empty."
+   call HELP                           /*                           -*/
+   end
+if pos    <> "" then parms = Copies(" ",pos-1 )parms; else
+if indent <> "" then parms = Copies(" ",indent)parms
+address TSO
+push parms
+"EXECIO" queued() "DISKW @OUT (FINIS"  /* must be pre-allocated      */
+if sw.batch then do
+   say
+   say " ------Output of" exec_name "delivered to FILE(@OUT)--------"
+   say
+   say "----+----1----+----2----+----3----+----4----+----5----+----6----+----7 "
+   say parms
+   say
+   end
+
+if \sw.nested then call DUMP_QUEUE 'quiet'
+exit                                   /*@ GENCARD                   */
+/*
+.  ----------------------------------------------------------------- */
+LOCAL_PREINIT:                         /*@ customize opts            */
+   address TSO
+
+   indent = KEYWD("INDENT")
+   pos    = KEYWD("POS")
+
+return                                 /*@ LOCAL_PREINIT             */
+/*   subroutines below LOCAL_PREINIT are not selected by SHOWFLOW    */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR"
+if helpmsg <> "" then say helpmsg
+ex_nam = Left(exec_name,8)             /* predictable size           */
+say "                                                                          "
+say "  GENCARD       Accept text in 'parms', write it onto file @OUT stripped, "
+say "                but otherwise as-is.                                      "
+say "                                                                          "
+say "  Syntax:   GENCARD   text                                                "
+say "                  ((  INDENT  ind                          (KEYWD in opts)"
+say "                      POS     ptr                          (KEYWD in opts)"
+say "                                                                          "
+say "            ind       specifies the number of characters to indent the    "
+say "                      text.                                               "
+say "                                                                          "
+say "            ptr       specifies the desired position of the first         "
+say "                      character of text                                   "
+say "                                                                          "
+say "            INDENT and POS are logically mutually exclusive.  If both are "
+say "            specified, POS is selected.                                   "
+say "                                                                          "
+say "                                               more......                 "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "                                                                          "
+say "  Examples:                                                               "
+say "                                                                          "
+say "  GENCARD was designed for automating JCL PROCs which might otherwise     "
+say "  require manual intervention.  A good example is a PanValet retrieve     "
+say "  which requires a control card of the form:                              "
+say "          ++WRITE,WORK,module                                             "
+say "                                                                          "
+say "  Normally, one would be forced to rely on other processes to generate the"
+say "  control card, but with GENCARD, if the variable data appears as a       "
+say "  parameter in the PROC, the line can be generated dynamically, written to"
+say "  temporary or permanent DASD, and referenced by following steps.  Sample "
+say "  JCL for a PanValet ++WRITE follows.  Other applications would be        "
+say "  implemented in a similar fashion.                                       "
+say "                                                                          "
+say "                                               more......                 "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "                                                                          "
+say "  SAMPLE JCL TO GENERATE A PANVALET ++WRITE STATEMENT:                    "
+say "                                                                          "
+say "    //REXX   EXEC PGM=IKJEFT01,                                           "
+say "    //       PARM='GENCARD ++WRITE,WORK,&MODULE.'                         "
+say "    //SYSPROC  DD DISP=SHR,DSN=DTCFXC1.PUBLIC.EXEC                        "
+say "    //SYSTSPRT DD SYSOUT=*                                                "
+say "    //SYSTSIN  DD DUMMY                                                   "
+say "    //@OUT     DD DISP=(NEW,PASS),UNIT=VIO,                               "
+say "    //            SPACE=(80,(1)),DCB=(RECFM=F,LRECL=80)                   "
+say "        (&MODULE to be supplied as a PROCedure parameter).                "
+say "                                                                          "
+say "  GENCARD will take all the remaining text in PARM and replicate it       "
+say "  left-justified in an 80-byte field.  This is written to file @OUT which "
+say "  is passed to a following step.                                          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        TRACE tv  will use value following TRACE to place the execution in"
+say "                  REXX TRACE Mode.                                        "
+say "                                                                          "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        TSO "ex_nam"  parameters     ((  debug-options                    "
+say "                                                                          "
+say "   For example                                                            "
+say "                                                                          "
+say "        TSO "ex_nam"  (( TRACE ?R                                         "
+
+if sysvar("SYSISPF") = "ACTIVE" then,
+address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */
+/*
+.  ----------------------------------------------------------------- */
+BRANCH: Procedure expose,              /*@                           */
+        sigl exec_name
+   rc = trace("O")                     /* we do not want to see this */
+   arg brparm .
+
+   origin = sigl                       /* where was I called from ?  */
+   do currln = origin to 1 by -1       /* inch backward to label     */
+      if Right(Word(Sourceline(currln),1),1) = ":" then do
+         parse value sourceline(currln) with pgfname ":" .  /* Label */
+         leave ; end                   /*                name        */
+   end                                 /* currln                     */
+
+   select
+      when brparm = "NAME" then return(pgfname) /* Return full name  */
+      when brparm = "ID"      then do           /* wants the prefix  */
+         parse var pgfname pgfpref "_" .        /* get the prefix    */
+         return(pgfpref)
+         end                           /* brparm = "ID"              */
+      otherwise
+         say left(sigl,6) left(pgfname,40) exec_name "Time:" time("L")
+   end                                 /* select                     */
+
+return                                 /*@ BRANCH                    */
+/*
+.  ----------------------------------------------------------------- */
+DUMP_QUEUE:                            /*@ Take whatever is in stack */
+   rc = trace("O")                     /*  and write to the screen   */
+   address TSO
+   arg mode .
+
+   "QSTACK"                            /* how many stacks?           */
+   stk2dump    = rc - tk_init_stacks   /* remaining stacks           */
+   if stk2dump = 0 & queued() = 0 then return
+   if mode <> "QUIET" then,
+   say "Total Stacks" rc ,             /* rc = #of stacks            */
+    "   Begin Stacks" tk_init_stacks , /* Stacks present at start    */
+    "   Excess Stacks to dump" stk2dump
+
+   do dd = rc to tk_init_stacks by -1  /* empty each one.            */
+      if mode <> "QUIET" then,
+      say "Processing Stack #" dd "   Total Lines:" queued()
+      do queued();parse pull line;say line;end /* pump to the screen */
+      "DELSTACK"                       /* remove stack               */
+   end                                 /* dd = 1 to rc               */
+
+return                                 /*@ DUMP_QUEUE                */
+/*
+.  ----------------------------------------------------------------- */
+KEYWD: Procedure expose info           /*@ hide all vars, except info*/
+   arg kw
+   kw_pos = wordpos(kw,info)           /* find where it is, maybe    */
+   if kw_pos = 0 then return ""        /* send back a null, not found*/
+   kw_val = word(info,kw_pos+1)        /* get the next word          */
+   info   = Delword(info,kw_pos,2)     /* remove both                */
+return kw_val                          /*@ KEYWD                     */
+/*
+.  ----------------------------------------------------------------- */
+KEYPHRS: Procedure expose,             /*@                           */
+         info helpmsg exec_name        /*  except these three        */
+   arg kp
+   wp    = wordpos(kp,info)            /* where is it?               */
+   if wp = 0 then return ""            /* not found                  */
+   front = subword(info,1,wp-1)        /* everything before kp       */
+   back  = subword(info,wp+1)          /* everything after kp        */
+   parse var back dlm back             /* 1st token must be 2 bytes  */
+   if length(dlm) <> 2 then            /* Must be two bytes          */
+      helpmsg = helpmsg,
+         "Invalid length for delimiter("dlm") with KEYPHRS("kp")"
+   if wordpos(dlm,back) = 0 then       /* search for ending delimiter*/
+      helpmsg = helpmsg,
+         "No matching second delimiter("dlm") with KEYPHRS("kp")"
+   if helpmsg <> "" then call HELP     /* Something is wrong         */
+   parse var back kpval (dlm) back     /* get everything b/w delim   */
+   info =  front back                  /* restore remainder          */
+return Strip(kpval)                    /*@ KEYPHRS                   */
+/*
+.  ----------------------------------------------------------------- */
+NOVALUE:                               /*@                           */
+   say exec_name "raised NOVALUE at line" sigl
+   say " "
+   say "The referenced variable is" condition("D")
+   say " "
+   zsigl = sigl
+   signal SHOW_SOURCE                  /*@ NOVALUE                   */
+/*
+.  ----------------------------------------------------------------- */
+SHOW_SOURCE:                           /*@                           */
+   call DUMP_QUEUE                     /* Spill contents of stacks  -*/
+   if sourceline() <> "0" then         /* to screen                  */
+      say sourceline(zsigl)
+   rc =  trace("?R")
+   nop
+   exit                                /*@ SHOW_SOURCE               */
+/*
+.  ----------------------------------------------------------------- */
+SS: Procedure                          /*@ Show Source               */
+   arg  ssbeg  ssend  .
+   if ssend = "" then ssend = 10
+   if \datatype(ssbeg,"W") | \datatype(ssend,"W") then return
+   ssend = ssbeg + ssend
+   do ssii = ssbeg to ssend ; say sourceline(ssii) ; end
+return                                 /*@ SS                        */
+/*
+.  ----------------------------------------------------------------- */
+SWITCH: Procedure expose info          /*@                           */
+   arg kw
+   sw_val = Wordpos(kw,info) > 0       /* exists = 1; not found = 0  */
+   if sw_val then                      /* exists                     */
+      info = Delword(info,Wordpos(kw,info),1) /* remove it           */
+return sw_val                          /*@ SWITCH                    */
+/*
+.  ----------------------------------------------------------------- */
+SYNTAX:                                /*@                           */
+   errormsg = exec_name "encountered REXX error" rc "in line" sigl":",
+                        errortext(rc)
+   say errormsg
+   zsigl = sigl
+   signal SHOW_SOURCE                  /*@ SYNTAX                    */
+/*
+   Can call TRAPOUT.
+.  ----------------------------------------------------------------- */
+TOOLKIT_INIT:                          /*@                           */
+   address TSO
+   info = Strip(opts,"T",")")          /* clip trailing paren        */
+
+   parse source  sys_id  how_invokt  exec_name  DD_nm  DS_nm,
+                     as_invokt  cmd_env  addr_spc  usr_tokn
+
+   parse value "" with  tv  helpmsg  .
+   parse value 0   "ISR00000  YES"     "Error-Press PF1"    with,
+               sw.  zerrhm    zerralrm  zerrsm
+
+   if SWITCH("TRAPOUT") then do
+      "TRAPOUT" exec_name parms "(( TRACE R" info
+      exit
+      end                              /* trapout                    */
+
+   if Word(parms,1) = "?" then call HELP /* I won't be back          */
+
+   "QSTACK" ; tk_init_stacks = rc      /* How many stacks?           */
+
+   parse value SWITCH("BRANCH") SWITCH("MONITOR") SWITCH("NOUPDT") with,
+               branch           monitor           noupdt    .
+
+   parse value mvsvar("SYSNAME") sysvar("SYSNODE") with,
+               #tk_cpu           node          .
+
+   sw.nested    = sysvar("SYSNEST") = "YES"
+   sw.batch     = sysvar("SYSENV")  = "BACK"
+   sw.inispf    = sysvar("SYSISPF") = "ACTIVE"
+
+   parse value KEYWD("TRACE")  "N"    with   tv  .
+   tk_globalvars = "tk_globalvars exec_name tv helpmsg sw. zerrhm",
+                   "zerralrm zerrsm zerrlm tk_init_stacks branch",
+                   "monitor noupdt"
+
+   call LOCAL_PREINIT                  /* for more opts             -*/
+
+return                                 /*@ TOOLKIT_INIT              */

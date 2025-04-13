@@ -1,0 +1,231 @@
+/* REXX    DSVCSI     Catalog Search Interface
+                      A fast way to get complex catalog searches done.
+           Use '(routine name)  ?' for HELP-text.
+
+           Written by someone at IBM probably
+
+     Modification History
+     20160307 fxc cleaned up grungy IBM coding; added basic tracing
+                  capability
+     20230426 fxc message if nothing found
+     20230511 fxc remove some dead code
+     20240308 fxc chg dollar-sign to @ everywhere;
+
+*/ arg argline                         /* pro-forma quick-start      */
+parse source  sys_id  how_invokt  exec_name  DD_nm  DS_nm,
+                  as_invokt  cmd_env  addr_spc  usr_tokn
+parse value "0"     with,
+            sw.    helpmsg
+address TSO
+arg parms "((" opts                    /* split parms and opts       */
+opts = Strip(opts,"T",")")             /* trim trailing bananas      */
+parse var opts "TRACE"  tv  .          /* is trace requested?        */
+parse value tv "N"  with  tv .         /* TRACE defaults to Normal   */
+rc = Trace("O"); rc = Trace(tv)        /* trace off, trace on?       */
+sw.0nested   = sysvar("SYSNEST") = "YES"
+sw.inispf    = sysvar("SYSISPF") = "ACTIVE"
+if parms = "?" then call HELP          /* ...and don't come back     */
+
+upper parms
+@@msg  = msg('off')
+
+if parms = '' then parms = sysvar("sysuid")
+parms = Strip(parms)
+origparm = parms                       /* save for later             */
+if Pos("*",parms) = 0 then parms = parms".**"
+
+csikey = parms
+
+count = 0    /*  set counter for dataset entry   */
+ /********************************************************************/
+ /*                                                                  */
+ /*       name: iggcsirx                                             */
+ /*description: this rexx exec is used to call the catalog           */
+ /*             search interface.                                    */
+ /*      input: filter key                                           */
+ /*     output: data sets names and volumes                          */
+ /*                                                                  */
+ /********************************************************************/
+ /********************************************************************/
+ /*                                                                  */
+ /*  initialize the parm list                                        */
+ /*                                                                  */
+ /********************************************************************/
+modrsnrc = Left(' ',4)              /*   clear module/return/reason  */
+csifiltk = Left(csikey,44)          /*   move filter key into list   */
+csicatnm = Left(' ',44)             /*   clear catalog name          */
+csiresnm = Left(' ',44)             /*   clear resume name           */
+csidtyps = Left(' ',16)             /*   clear entry types           */
+csicldi  = "Y"                      /*   indicate data and index     */
+csiresum = Left(' ',1)              /*   clear resume flag           */
+csis1cat = Left(' ',1)              /*   indicate search > 1 catalogs*/
+csiresrv = Left(' ',1)              /*   clear reserve character     */
+csinumen = '0001'x                  /*   init number of fields       */
+csifld1  = Left('SECFLAGS',8)       /*   put here for test           */
+ /********************************************************************/
+ /*                                                                  */
+ /*  build the selection criteria fields part of parameter list      */
+ /*                                                                  */
+ /********************************************************************/
+csifield = csifiltk || csicatnm || csiresnm || csidtyps ||,
+           csicldi  || csiresum || csis1cat || csiresrv,
+                    || csinumen || csifld1
+ /********************************************************************/
+ /*                                                                  */
+ /*  initialize and build work are output part of parameter list     */
+ /*                                                                  */
+ /********************************************************************/
+     rc = Trace("O")                   /* avoid 20 pages of echo     */
+     worklen = 64000
+     dwork = '0000FA00'x || copies('00'x,worklen-4)
+ /*                                                  */
+ /*  worklen = 1024                                  */
+ /*  dwork = '00000400'x || copies('00'x,worklen-4)  */
+     rc = Trace(tv)
+
+ /********************************************************************/
+ /*                                                                  */
+ /*  initialize work variables                                       */
+ /*                                                                  */
+ /********************************************************************/
+resume   = 'Y'
+catnamet = Left(' ',44)
+dnamet   = Left(' ',44)
+
+ if sw.0nested then nop
+               else "NEWSTACK"
+ /********************************************************************/
+ /*                                                                  */
+ /*  set up loop for resume (if a resume is necessary)               */
+ /*                                                                  */
+ /********************************************************************/
+do while resume = 'Y'
+
+ /********************************************************************/
+ /*                                                                  */
+ /*  issue link to catalog generic filter interface                  */
+ /*                                                                  */
+ /********************************************************************/
+   address linkpgm 'iggcsi00  modrsnrc  csifield  dwork'
+
+   resume  = substr(csifield,150,1)  /* get resume flag for next loop
+                                          from csiresum              */
+   usedlen = c2d(substr(dwork,9,4)) /* get amount of work area used  */
+   fld_no  = c2d(substr(dwork,13,2)) - 1 /* get number of fields     */
+   pos1    = 15                       /* starting position           */
+
+ /********************************************************************/
+ /*                                                                  */
+ /*  process data returned in work area                              */
+ /*                                                                  */
+ /********************************************************************/
+   do while pos1 < usedlen          /* do until all data is processed*/
+      if substr(dwork,pos1+1,1) = '0' /* if catalog, prt catalog head*/
+         then do
+         pos1 = pos1 + 50
+         end                           /* 0 = catalog                */
+
+      dname = substr(dwork,pos1+2,44) /* get entry name              */
+
+ /********************************************************************/
+ /*                                                                  */
+ /*  assign entry type name                                          */
+ /*                                                                  */
+ /********************************************************************/
+      tmptyp = substr(dwork,pos1+1,1)
+      select
+         when tmptyp = 'C' then dtype = 'CLUSTER '
+         when tmptyp = 'D' then dtype = 'DATA    '
+         when tmptyp = 'I' then dtype = 'INDEX   '
+         when tmptyp = 'A' then dtype = 'NONVSAM '
+         when tmptyp = 'H' then dtype = 'GDS     '
+         when tmptyp = 'B' then dtype = 'GDG     '
+         when tmptyp = 'R' then dtype = 'PATH    '
+         when tmptyp = 'G' then dtype = 'AIX     '
+         when tmptyp = 'X' then dtype = 'ALIAS   '
+         when tmptyp = 'U' then dtype = 'UCAT    '
+         otherwise dtype = ''
+      end                              /* select                     */
+ /********************************************************************/
+ /*                                                                  */
+ /*  have name and type, get field info                              */
+ /*                                                                  */
+ /********************************************************************/
+
+      pos1    = pos1 + 46
+      pos_tmp = pos1 + 2    /* point to field length strings - 2  */
+
+   /* get length of each field    */
+      do i = 1 to fld_no
+         fld_len.i = c2d(substr(dwork,pos_tmp+2,2))
+         pos_tmp   = pos_tmp + 2
+      end                              /* fld_no                     */
+
+      /* get field data                                           */
+      pos_tmp = pos1 + 4 + (fld_no * 2) /* point to data string   */
+
+      /* field 1 - secflags */
+      sec_typ = ' '
+      if numvol_devtyp = 0 then nop
+      sec_typ = c2x(substr(dwork,pos_tmp,1))
+
+      if dnamet ¬= dname &,         /* if resume, name may already   */
+         dtype ¬= ''   then         /*    printed                    */
+         do                         /* if not, print it              */
+         count = count + 1
+         queue  Left(dtype,8) dname
+         dnamet = dname
+         end
+ /********************************************************************/
+ /*                                                                  */
+ /*   get position of next entry                                     */
+ /*                                                                  */
+ /********************************************************************/
+      pos1 = pos1 + c2d(substr(dwork,pos1,2))
+   end  /* end of  do while pos1 < usedlen  */
+end     /* end of  do while resume = 'y'    */
+
+if count = 0 then ,                    /* nothing queued             */
+   queue "No data found for" origparm
+
+@z = msg(@@msg)                        /* reset MSG setting          */
+if sw.0nested then return
+else do
+   do queued()
+   parse pull line; say line
+   end                                 /* queued                     */
+   end
+
+exit                                   /*@ DSVCSI                    */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR"
+if helpmsg <> "" then say helpmsg; say ""
+ex_nam = Left(exec_name,8)             /* predictable size           */
+say "  "ex_nam"      is the driver for the Catalog Search Index, a very        "
+say "                high-efficiency catalog search to be used in place of TSO "
+say "                functions such as LISTCAT, etc.                           "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  target                                              "
+say "                                                                          "
+say "            target    is a string representing the entities to be         "
+say "                      searched-for.  It may be generic.                   "
+say "                                                                          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        TRACE tv: will use value following TRACE to place the execution in"
+say "                  REXX TRACE Mode.                                        "
+say "                                                                          "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        TSO "ex_nam"  parameters     ((  debug-options                    "
+say "                                                                          "
+say "   For example:                                                           "
+say "                                                                          "
+say "        TSO "ex_nam"  (( TRACE ?R                                         "
+if sysvar("SYSISPF") = "ACTIVE" then,
+   address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */

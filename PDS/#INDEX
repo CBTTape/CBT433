@@ -1,0 +1,201 @@
+
+         'FCLARKE.TOOLPACK.EXEC' - Directory
+
+
+           Usage or
+ Member    Caller      Description
+ ========  =========   =====================================
+
+ $$$#DATE  data        Download stats
+
+ $EXAMPLE  fragment    Pro-forma new paragraph
+
+ #INDEX    data        This member
+
+ @@README  text        About the material in this library
+
+ @FILE433  text        Inventory
+
+ ACQ       exec        Copy a member to the 1st dataset of a file
+
+ ADDCMDS   exec        Apply TMPCMDS to ISPCMDS
+
+ ALIST     exec        Display current allocations
+
+ ATTACH    exec        Logon customization
+
+ BLOX      exec        Block letter write modeled after IEFSD095
+
+ CMDUPD    exec        Update local command table
+
+ COMBINE   exec        Combine 2 or more datasets with incompat DCBs
+
+ COMMANDS  exec        Display current command table contents
+
+ DEIMBED   fragment    Extract ISPF elements from REXX
+
+ DFLTTLIB  fragment    How to set up a default ISPTLIB
+
+ DIRSTATS  exec        LISTD with statistics
+
+ DSPROF    exec        Display via LISTDSI dataset characteristics
+
+ DSVCSI    exec        Catalog Search Interface
+
+ DUP       exec        Allocate or copy-to a new dataset
+
+ EDBR      macro       Edit-from-Browse
+
+ FCCMDUPD  exec        Insert a new command onto TMPCMDS
+
+ FCXREF    exec        Cross-reference 2 or more PDSs
+
+ FIRSTIME  exec        Control re-runs
+
+ FIXSTATS  exec        Manipulate ISPF member stats
+
+ FIXTBL    exec        Jump to ISPF 3.9
+
+ FLTTBL    exec        Flatten any table (see RSTTBL)
+
+ FSMSG     exec        Send a multi-line message
+
+ GENCARD   exec        Produce control card from parms
+
+ GETIA     macro       Extract Impact Analysis from REXXSKEL-based code
+
+ ICEUSER   exec        Authorized users
+
+ IDENT     macro       Insert membername to REXX code
+
+ ISOLATE   macro       ONLY this word
+
+ JFORM     macro       Reformat JCL
+
+ JOBCARDS  exec        Build/update default jobcards for JCL
+
+ KED       macro       Edit DDN(mbr); aliased as KBR and KVW
+
+ LA        exec        LISTA ST to a scrollable display
+
+ LDOW      exec        Calc nth-day-of-the-week for any month
+
+ LISTCSUM  exec        LISTCAT subroutine for VCX
+
+ LOADKEYS  exec        Key definitions
+
+ MAKEPARA  macro       Generate new paragraph for REXXSKEL-based code
+
+ MDEL      exec        Delete a member from anywhere
+
+ MEMBERS   exec        Return memberlist to the stack
+
+ MEMIDX    exec        Create/Update #INDEX (this member)
+
+ MIGRATE   exec        Migrate code from work to final
+
+ MREN      exec        Rename a member from anywhere
+
+ MTHLIM    SCHED       Determine Start-DOW and length of a month
+
+ NOOP      exec        IEFBR14
+
+ OUTDENTS  macro       Show only do-end etc.
+
+ PACKING   fragment    How to convert to/from FIXED DECIMAL
+
+ PDSCOPYD  exec        Copy a member with stats
+
+ PDS2SEQ   exec        Convert PDS to IEBGENER input
+
+ PERMCLAS  fragment    Supply STGCLASS and MGMTCLASS
+
+ POPINDX   exec        Populate one #INDEX member from another
+
+ POSIT     macro       Position an Edit/View session
+
+ PROFILES  exec        Manipulate Edit profiles
+
+ PROFVARS  exec        Display variables in profiles
+
+ QPWEXP    exec        When does my password expire?
+
+ REALIAS   exec        Re-establish aliases from the Impact Analysis
+
+ REXXIA    exec        Do an Impact Analysis for an entire dataset
+
+ REXXSKEL  example     Basis for most code here
+
+ RSTTBL    exec        Restore a table flattened by FLTTBL
+
+ RUNDATA   exec        Maintain application-specific information
+
+ SAYVAR    exec        Display/Update variables from ISPF pools
+
+ SCHED     exec        Create a calendar page for one month
+
+ SCRAM     exec        Produce FTP files for transferring libraries
+
+ SEIZE     exec        Copy a member to a distant dataset with stats
+
+ SELMATCH  macro       Match )SEL and )ENDSEL in skeleton
+
+ SEQ2PDS   exec        Anti-process of PDS2SEQ
+
+ SETALIAS  exec        Establish dataset aliases
+
+ SETEPROF  macro       Set ZDEFAULT profile
+
+ SETREFS   macro       Change JCL DSNs to backward-references
+
+ SHORTRX   fragment    No-frills REXX-base
+
+ SHOWFLOW  macro       Display CALLs and targets in REXX
+
+ SHOWME    exec        Display first-found by DDName
+
+ SORTCMDS  exec        Sort a Command Table
+
+ SQRT      exec        Square root (claimed by Robin Ryerse)
+
+ STAKEDIT  exec        Recursive Edit/Browse/View (ED/BR/VW)
+
+ STEPS     macro       Bring out all JCL EXEC rows
+
+ STRLEN    macro       Display a length-line over a quoted string
+
+ STRSORT   exec        Sort a string of words
+
+ SUPBR     exec        SuperBrowse
+
+ SUPED     exec        SuperEdit
+
+ SYSAMON   exec        Groom/Report activity in SYSUMON
+
+ SYSUMON   exec        Count tool usage
+
+ SYSVARS   exec        Show SYSVARs and MVSVARs
+
+ S2PTRIM   subr        Subr of SEQ2PDS
+
+ TBCOPY    exec        Copy a table using AAMSTR
+
+ TBLGEN    exec        Build a table from AAMSTR specs
+
+ TBLMSTR   exec        Maintain AAMSTR table
+
+ TBLOOK    exec        Examine and update any table
+
+ TEXAMU    exec        TBLOOK from the memberlist
+
+ TRAPOUT   exec        Trap trace output to DASD
+
+ UPDSTAT   exec        Update ISPF statistics
+
+ VCX       exec        Show IDCAMS for any file
+
+ VWBR      exec        View from Browse
+
+ WB        exec        Insert "Written by" data
+
+ WBNAME    fragment    Data for WB

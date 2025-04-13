@@ -1,0 +1,1233 @@
+/* REXX    SYSAMON    (v.2) Maintain the SYSUMON VSAM file.
+           Use '(routine name)  ?' for HELP-text.
+
+           Written by Frank Clarke 20040607
+
+     Impact Analysis
+.    SYSEXEC   RUNDATA
+.    SYSEXEC   STRSORT
+.    SYSEXEC   TRAPOUT
+.    SYSEXEC   WHOIS
+
+     Modification History
+     20040709 fxc move OPENs and CLOSEs within the range of use;
+     20041117 fxc update ImpAnal;
+     20050216 fxc list 92 bytes only;
+     20061205 fxc add Grand Total counts;
+     20070212 fxc make it work for a DUMP dataset as input;
+     20080111 fxc correct reporting for detailed request;
+     20090102 fxc fix problem with calculation of DSMO at
+                  change-of-year;
+     20211029 fxc block execution of WHOIS; user names are available via
+                  internal control blocks
+     20230202 fxc blank-fill counters instead of zero-fill;
+     20230501 fxc chg @LOG to ZZLOG; force to end of list
+     20230723 fxc modernize logging;
+     20230726 fxc adjust HELP;
+     20230908 fxc set log lrecl to 255;
+     20240301 fxc prevent EXECIO 0 DISKW for dumpds;
+     20240309 fxc change dollar-sign to @ everywhere;
+     20240509 fxc RUNDATA supplies RXVSAMLL, NVPREF, and VSPREF;
+     20240701 fxc init RUNDATA variables to null; make restartable
+                  from READY; chg DUMP LRECL to 60;
+     20240703 fxc update I/A;
+     20250404 fxc clip too-long lines;
+
+*/ arg argline
+address TSO                            /* REXXSKEL ver.20040227      */
+arg parms "((" opts
+
+signal on syntax
+signal on novalue
+
+call TOOLKIT_INIT                      /* conventional start-up     -*/
+
+if sw.inispf = 0 then do
+   arg line
+   line = line "((  RESTARTED"         /* tell the next invocation   */
+   address TSO
+   "ISPSTART CMD("exec_name line")"    /* Invoke ISPF if nec.        */
+   exit 2                              /* bail out                   */
+   end
+
+rc = Trace("O"); rc = Trace(tv)
+info   = parms                         /* to enable parsing          */
+
+call A_INIT                            /* Initialization            -*/
+
+if dumpin = "" then,
+   call B_VSAM_OPS                     /* Dump and/or Trim data     -*/
+else,
+   call C_DUMP_OPS                     /* Dump data to output       -*/
+
+if sw.0SaveLog then,
+   call ZB_SAVELOG                     /*                           -*/
+
+if \sw.nested then do
+   "CLEAR"
+   call DUMP_QUEUE 'quiet'             /*                           -*/
+   end
+
+if sw.0restarted then do               /* at end of mainline         */
+   rc = OutTrap("ll.")
+   exit 4
+   end
+
+exit                                   /*@ SYSAMON                   */
+/*
+   Initialization
+.  ----------------------------------------------------------------- */
+A_INIT:                                /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   call AA_SETUP_LOG                   /* sets yyyymmdd, mm, dd     -*/
+   parse value yyyymmdd Date("B") with yy4 5  .  b_date
+   parse value "0 0 0 0 0 0 0 0 0 0 0" with,
+         byuser.   byitem.  ,
+         gt     sum.      ct.      .
+   parse value "" with,
+         altname.  dumpmo   vskey    rxvsam_vsamerrormsg ,
+         altulist  items    uidlist  record   prevuser  previtem  ,
+         keyorig   name.    userkeylist   itemkeylist ,
+         replist   ,
+         .
+   call AB_LAST_MONTH                  /* Determine the prior month -*/
+   call AK_KEYWDS                      /* Parse out TOOL and USER   -*/
+
+return                                 /*@ A_INIT                    */
+/*
+   Prep progress-log dataset
+.  ----------------------------------------------------------------- */
+AA_SETUP_LOG:                          /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   parse value "0" with,
+               log#    log.
+   parse value Date("S")  Time("S")  Time("N")  with,
+               yyyymmdd   sssss      hhmmss  .
+   hhmmss = Space( Translate( hhmmss,' ',':' ) ,0 )
+   parse var yyyymmdd  4 yrdigit 5 mm 7 dd          /* 9 12 14 maybe */
+   if Pos(yrdigit,"13579") > 0 then mm = mm + 12       /* mm=24      */
+   logtag = Substr("ABCDEFGHIJKLMNOPQRSTUVWX",mm,1)    /* logtag=X   */
+   subid  = logtag""dd""Left(  hhmmss,4 )              /* X141743  ? */
+   vb4k.0    = "NEW CATALOG UNIT(SYSDA) SPACE(1 5) TRACKS",
+               "RECFM( V B ) LRECL( 255 ) BLKSIZE( 0 )"
+   logdsn = "ZZLOG."exec_name"."subid".LIST"
+
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref,
+   exec_name "started by" Userid() yyyymmdd hhmmss)
+   call ZL_LOGMSG( logpref "Arg:" argline)
+
+return                                 /*@ AA_SETUP_LOG              */
+/*
+   Determine the prior month
+.  ----------------------------------------------------------------- */
+AB_LAST_MONTH:                         /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   lastmoend = Date("S",b_date-dd,"B")   /* last day of prev month   */
+   parse var lastmoend  5 lastmo 7 3 dsmo 7
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref  ,
+                   "DSMO set to" dsmo)
+
+return                                 /*@ AB_LAST_MONTH             */
+/*
+   Parse out TOOL and USER
+.  ----------------------------------------------------------------- */
+AK_KEYWDS:                             /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   caller = KEYWD("USER")              /* particular userid          */
+   tool   = KEYWD("TOOL")              /* particular tool            */
+   dumpin = KEYWD("INDUMP")            /* DUMP dataset as input      */
+
+   sw.0Clear = SWITCH( "CLEAR" )       /* placed last in case there are
+                                          ever tools with these names*/
+   sw.0List  = SWITCH( "LIST" )
+   sw.0Sum   = SWITCH( "SUMMARY" )     /* valid only for LIST        */
+   if Space(caller tool,0) <> "" then, /* specific                   */
+      parse value "1 1 0" with sw.0Detail sw.0List sw.0Sum
+
+   if dumpin <> "" then,               /* using DUMP for input       */
+      do
+      parse value 0 with sw.0Clear     /* nothing else needed        */
+      opts = ""
+      if sw.0List + sw.0Sum = 0 then   /* both off                   */
+         parse value "1 1" with sw.0List sw.0Sum
+      end
+
+   sw.0Trim  = SWITCH( "TRIM" )
+   dumpds    = KEYWD("DUMPTO")         /* DUMP output                */
+
+   parse var yyyymmdd       5 mm 7     /* reset mm to original value */
+             /* parse this dead-last........                         */
+   if WordPos("DUMP",info) > 0 then do
+      parse value KEYWD("DUMP")  lastmo   with,
+                  dumpmo .             /* pick up dump-month: nn     */
+      dumpmo = Right(dumpmo,2,0)
+      if dumpmo > mm then do           /* must be last year!         */
+         yy4 = yy4 - 1
+         end                           /* last year                  */
+      dsmo = Right(yy4 || dumpmo,4)
+      if dumpmo <> lastmo then,
+         logpref = "("Branch( "ID" )")"
+         call ZL_LOGMSG( logpref  ,
+                         "DSMO reset to" dsmo)
+
+      if dumpmo = "" then sw.0Clear = 0 /* CLEAR only if DUMP        */
+
+      if dumpds = "" then return
+      if dumpds = "DEFAULT" then,
+         dumpds = "'"nvpref".SYSUMON.DUMP"dsmo"'"
+      end                              /* DUMP                       */
+
+   if sw.0Clear then,                  /* do everything              */
+      parse value "" with caller tool
+
+return                                 /*@ AK_KEYWDS                 */
+/*
+   LIBDEF to <RXVSAMLL> to enable calls to RXVSAM.
+.  ----------------------------------------------------------------- */
+B_VSAM_OPS:                            /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   if sw.inispf then,
+      address ISPEXEC "LIBDEF ISPLLIB DATASET" ,
+                      "ID( '"rxvsamll"' ) STACK"
+
+   "ALLOC FI(@VS) DA("vsamksds") SHR REU"
+
+   if sw.0List | dumpmo <> "" then,    /* list or dump               */
+      call BD_DUMP_DATA                /* List selected records     -*/
+
+   if sw.0Trim then do                 /* reduce wasted lines        */
+      call BT_TRIM_DATA                /* Eliminate zero records    -*/
+      end
+
+   "FREE  FI(@VS)"
+
+   if sw.inispf then,
+      address ISPEXEC "LIBDEF ISPLLIB"
+
+return                                 /*@ B_VSAM_OPS                */
+/*
+   List selected records.  Full listing or selected month?
+.  ----------------------------------------------------------------- */
+BD_DUMP_DATA:                          /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   if dumpmo <> "" then,               /* one month                  */
+      call BDM_SPILL_MONTH             /* Process specific month    -*/
+   else,
+      call BDQ_GENL_LIST               /* general list              -*/
+
+return                                 /*@ BD_DUMP_DATA              */
+/*
+   Process specific month.
+.  ----------------------------------------------------------------- */
+BDM_SPILL_MONTH:                       /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   call BDMA_ACQUIRE_CTS               /* spin VSAM and get counts  -*/
+
+   if sw.0List + sw.0Sum > 0 then,
+      call BDMU_GET_NAMES              /* identify users            -*/
+
+   if sw.0List then do
+      call BDMB_USERLIST               /* list sorted by user       -*/
+      call BDMC_ITEMLIST               /* list sorted by tool       -*/
+      end                              /* sw.0list                   */
+
+   if sw.0Sum  then do
+      call BDMS_SUMMARY                /* summary counts only       -*/
+      end                              /* sw.0list                   */
+
+   if dumpds <> "" then do
+      call BDMD_DUMP_DATA              /* spill to DASD             -*/
+      end                              /* dumpds                     */
+
+return                                 /*@ BDM_SPILL_MONTH           */
+/*
+   Find the usage counts for the selected (or all) categories.
+.  ----------------------------------------------------------------- */
+BDMA_ACQUIRE_CTS:                      /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   if sw.0Clear then do
+      rxv_rc = RXVSAM("OPENIO","@VS","KSDS")
+      sw.0SaveLog = 1
+      logpref = "("Branch( "ID" )")"
+      call ZL_LOGMSG( logpref  ,
+                      vsamksds "opened for UPDATE")
+      end
+   else do
+      rxv_rc = RXVSAM("OPENINPUT","@VS","KSDS")
+      logpref = "("Branch( "ID" )")"
+      call ZL_LOGMSG( logpref  ,
+                      vsamksds "opened for INPUT")
+      end
+
+   do forever
+      rxv_rc = RXVSAM("READNEXT","@VS",,"RECORD")
+      if rxv_rc > 0 then leave
+
+      parse var record user . 9 item . 17,
+                ct.01 ct.02 ct.03 ct.04 ct.05 ct.06,
+                ct.07 ct.08 ct.09 ct.10 ct.11 ct.12,
+                keyorig  rowname
+
+      if altname.user = "" then,
+      if rowname     <> "" then do
+         altname.user = SHIFT( rowname )  /* Capitalize             -*/
+         altulist  = altulist user
+         end
+
+      if WordPos(user,uidlist) = 0 then ,
+         uidlist = uidlist user
+      if WordPos(item,items  ) = 0 then ,
+         items   = items   item
+
+      if caller <> "" & caller <> user then iterate
+      if tool   <> "" & tool   <> item then iterate
+      if ct.dumpmo = 0                 then iterate
+      ct.dumpmo = ct.dumpmo + 0
+
+      userkey = user"."item
+      userkeylist = userkeylist userkey
+      byuser.userkey = ct.dumpmo
+      byuser.user    = byuser.user + ct.dumpmo
+
+      itemkey = item"."user
+      itemkeylist = itemkeylist itemkey
+      byitem.itemkey = ct.dumpmo
+      byitem.item    = byitem.item + ct.dumpmo
+
+      if noupdt = 0 then,              /* OK to update               */
+      if sw.0Clear then do             /* zap counts                 */
+         logpref = "("Branch( "ID" )")"
+         call ZL_LOGMSG( logpref  ,
+                         "Rewriting" user item ct.dumpmo)
+         ct.dumpmo = 0
+         call BDMAP_PUT_KEY            /* Write updated             -*/
+         end                           /* sw.0Clear                  */
+   end                                 /* forever                    */
+   rxv_rc = RXVSAM("CLOSE","@VS")
+
+   userkeylist = STRSORT(userkeylist)
+   itemkeylist = STRSORT(itemkeylist)
+
+return                                 /*@ BDMA_ACQUIRE_CTS          */
+/*
+   Write-with-key the updated record.  Clearing out a column.
+.  ----------------------------------------------------------------- */
+BDMAP_PUT_KEY:                         /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   record = Left(user,8)Left(item,8),
+            Right(ct.01,5,' '),
+            Right(ct.02,5,' '),
+            Right(ct.03,5,' '),
+            Right(ct.04,5,' '),
+            Right(ct.05,5,' '),
+            Right(ct.06,5,' '),
+            Right(ct.07,5,' '),
+            Right(ct.08,5,' '),
+            Right(ct.09,5,' '),
+            Right(ct.10,5,' '),
+            Right(ct.11,5,' '),
+            Right(ct.12,5,' '),
+            keyorig "          "rowname
+
+   key = Left(user,8)Left(item,8)
+   rxv_rc = RXVSAM("REWRITE","@VS","KEY","RECORD")
+
+return                                 /*@ BDMAP_PUT_KEY             */
+/*
+   List usage by user
+.  ----------------------------------------------------------------- */
+BDMB_USERLIST:                         /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   "CLEAR"                             /* ... the screen             */
+   say  "- User - - Tool - - Ct-   Month="dumpmo
+   say  "-------- -------- -----"
+
+   do bz = 1 to Words(userkeylist)     /* each key                   */
+      ukey = Word(userkeylist,bz)      /* get key                    */
+      parse var ukey user "." item
+      if user <> prevuser then do
+         if byuser.prevuser <> 0 then do
+            say   Left(' ' ,8) Left(' ' ,8) Right(byuser.prevuser,5),
+                                            Space( name.prevuser,1 )
+            end
+         say; prevuser = user
+         end
+      say   Left(user,8) Left(item,8) Right(byuser.ukey,5)
+      byuser.tot = byuser.tot + byuser.ukey
+   end                                 /* bz                         */
+   if byuser.prevuser <> 0 then,
+      say   Left(' ' ,8) Left(' ' ,8) Right(byuser.prevuser,5),
+                                      Space( name.prevuser,1 )
+
+   say   Left(' ' ,8) Left(' ' ,8) Right(byuser.tot     ,5),
+                          "All users, all tools"
+
+   "NEWSTACK" ; pull ; "DELSTACK"
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref  ,
+                   "Counted" byuser.tot "usage by-user.")
+
+return                                 /*@ BDMB_USERLIST             */
+/*
+   List usage by item
+.  ----------------------------------------------------------------- */
+BDMC_ITEMLIST:                         /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   "CLEAR"                             /* ... the screen             */
+   say  "- User - - Tool - - Ct-   Month="dumpmo
+   say  "-------- -------- -----"
+
+   do bz = 1 to Words(itemkeylist)     /* each key                   */
+      ikey = Word(itemkeylist,bz)      /* get key                    */
+      parse var ikey item "." user
+      if item <> previtem then do
+         if byitem.previtem <> 0 then,
+            say   Left(' ' ,8) Left(' ' ,8) Right(byitem.previtem,5)
+         say; previtem = item
+         end
+      say   Left(user,8) Left(item,8) Right(byitem.ikey,5)
+      byitem.tot = byitem.tot + byitem.ikey
+   end                                 /* bz                         */
+   if byitem.previtem <> 0 then,
+      say   Left(' ' ,8) Left(' ' ,8) Right(byitem.previtem,5)
+
+   say   Left(' ' ,8) Left(' ' ,8) Right(byitem.tot     ,5),
+                          "All users, all tools"
+
+   "NEWSTACK" ; pull ; "DELSTACK"
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref  ,
+                   "Counted" byitem.tot "usage by-item.")
+
+return                                 /*@ BDMC_ITEMLIST             */
+/*
+   Dump to DASD using USERKEYLIST.
+.  ----------------------------------------------------------------- */
+BDMD_DUMP_DATA:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   alloc.0   = "NEW CATALOG UNIT( SYSDA ) SPACE( 1 2 ) TRACKS",
+               "RECFM( V B ) LRECL( 60 ) BLKSIZE( 0 )"
+   alloc.1   = "MOD"                   /* if it already exists...    */
+   tempstat = Sysdsn(dumpds) = "OK"    /* 1=exists, 0=missing        */
+   "ALLOC FI(@TMP) DA("dumpds") REU" alloc.tempstat
+
+   "NEWSTACK"
+   do bz = 1 to Words(userkeylist)     /* each key                   */
+      ukey = Word(userkeylist,bz)      /* get key                    */
+      parse var ukey user "." item
+
+      queue Left(user,8) Left(item,8) Right(byuser.ukey,5) altname.user
+   end                                 /* bz                         */
+   if queued() = 0 then,
+      push "----------- No items to write -------------"
+
+   sw.0SaveLog = 1
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref  ,
+                   "Writing" queued() "lines to" dumpds)
+   "EXECIO" queued() "DISKW @TMP (FINIS"
+   "FREE  FI(@TMP)"
+   "DELSTACK"
+
+return                                 /*@ BDMD_DUMP_DATA            */
+/*
+   Summary by user and by tool.  If there are too many of one kind or
+   the other (total count > scrnlen) and there is room on the screen
+   (total count < scrnlen*2), the excess items can be folded into the
+   other column at the bottom.
+.  ----------------------------------------------------------------- */
+BDMS_SUMMARY:                          /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   parse value "" with prt.  uslot. islot.
+   uidlist = STRSORT(uidlist)
+   items   = STRSORT(items)
+   call BDMSI_ITEMLIST                 /* Clear zero items          -*/
+   call BDMSU_USERLIST                 /* Clear zero users          -*/
+   parse value Words(uidlist) Words(items) with,
+               uidct          itemct  .
+
+   scrnlen = Sysvar("SYSLTERM") - 2    /* usable lines on screen     */
+   if (uidct + itemct) < (scrnlen*2) then,       /* 40+9 < 26*2      */
+   if uidct > scrnlen then do          /* 40 > 26                    */
+      excess_items = uidct - scrnlen   /* 40 - 26 = 14               */
+      other_col_start = scrnlen - excess_items + 1     /* 26-14+1=13 */
+      uidct = scrnlen                  /* 26                         */
+      end
+   else if itemct > scrnlen then do
+      excess_items = itemct - scrnlen
+      other_col_start = scrnlen - excess_items + 1
+      itemct = scrnlen
+      end
+
+   /* Build the print lines                                          */
+   do bx = 1 to uidct                  /* each uid                   */
+      parse var uidlist   uid uidlist
+      name    = Space(name.uid,1)
+      prt.bx  = " ",                   /* 01 - 01                    */
+                uid,                   /* 02 - 08                    */
+                Right(byuser.uid,5),   /* 09 - 13                    */
+                " ",                   /* 14 - 16                    */
+                Left(name    ,23)      /* 17 - 39                    */
+   end                                 /* bx                         */
+   prt.0 = uidct
+
+   do bx = 1 to itemct                 /* each uid                   */
+      parse var items  item items
+      prt.bx  = Left(prt.bx,48),       /* 01 - 48                    */
+             || Left(item,8),          /* 49 - 56                    */
+                Right(byitem.item,5)   /* 57 - 61                    */
+      gt      = gt + byitem.item
+   end                                 /* bx                         */
+   prt.0  = Max( uidct, itemct )
+
+   if uidlist <> "" then do            /* excess items               */
+      do bx = other_col_start to scrnlen
+         parse var uidlist   uid uidlist
+         name    = Space(name.uid,1)
+         prt.bx  = Left(prt.bx,47),
+                   uid,
+                   Right(byuser.uid,5),
+                   " ",
+                   Left(name    ,23)
+      end                              /* bx                         */
+      prt.0 = scrnlen
+      end                              /* uidlist                    */
+
+   if items <> "" then do              /* excess items               */
+      do bx = other_col_start to scrnlen
+         slug = Left(item,8),
+                Right(byitem.item,5)
+         prt.bx = Overlay(slug,prt.bx,2)
+      end                              /* bx                         */
+      prt.0 = scrnlen
+      end                              /* items                      */
+
+   "CLEAR"
+   do bx = 1 to prt.0                  /* each uid                   */
+      say prt.bx
+   end                                 /* bx                         */
+   say  Left(" ",8),
+        Right(gt,5) "  Grand Total   ",
+               uidct "users     " itemct "tools"
+
+return                                 /*@ BDMS_SUMMARY              */
+/*
+   Eliminate any items with a zero use-count
+.  ----------------------------------------------------------------- */
+BDMSI_ITEMLIST:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   w1 = ""                             /* init                       */
+   do Words(items)
+      parse value items w1  with  w1 items
+      if byitem.w1   = 0 then w1 = ""
+   end                                 /* items                      */
+   items = items w1
+
+return                                 /*@ BDMSI_ITEMLIST            */
+/*
+   Eliminate any users with a zero use-count
+.  ----------------------------------------------------------------- */
+BDMSU_USERLIST:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   w1 = ""                             /* init                       */
+   do Words(uidlist)
+      parse value uidlist w1 with w1 uidlist
+      if byuser.w1   = 0 then w1 = ""
+   end                                 /* uidlist                    */
+   uidlist = uidlist w1
+
+return                                 /*@ BDMSU_USERLIST            */
+/*
+   Connect name to userid
+.  ----------------------------------------------------------------- */
+BDMU_GET_NAMES:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   return                              /* execution blocked          */
+   replist = ""                        /* init                       */
+   "NEWSTACK"
+   "WHOIS" uidlist                     /* get user names             */
+   do queued()
+      pull uid name.uid
+      if name.uid = "?" then,
+      if altname.uid <> "" then do
+         replist  = replist uid
+         name.uid = altname.uid
+         end
+   end                                 /* queued                     */
+   "DELSTACK"
+
+return                                 /*@ BDMU_GET_NAMES            */
+/*
+   sw.0Sum may be set.
+.  ----------------------------------------------------------------- */
+BDQ_GENL_LIST:                         /*@                           */
+   bdq_tv = trace()                    /* what setting at entry ?    */
+   if branch then call BRANCH
+   address TSO
+
+   rxv_rc = RXVSAM("OPENINPUT","@VS","KSDS")
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref  ,
+                   vsamksds "opened for INPUT")
+   if sw.0Sum then parse value "" with,
+                        caller tool    /* invalid for summary        */
+
+   do forever
+      rxv_rc = RXVSAM("READNEXT","@VS",,"RECORD")
+      if rxv_rc > 0 then leave
+
+      parse var record user . 9 item . 17,
+                ct.01 ct.02 ct.03 ct.04 ct.05 ct.06,
+                ct.07 ct.08 ct.09 ct.10 ct.11 ct.12,
+                keyorig  uname
+
+      /* Produce totals for this data                                */
+      call BDQC_SUMMARIZE              /* Foot and crossfoot        -*/
+      if sw.0Sum then iterate
+
+      if caller <> "" & caller <> user then iterate
+      if tool   <> "" & tool   <> item then iterate
+      queue Left( user,8 ) Left( item,8 ),
+            Right( ct.01,5 ) ,
+            Right( ct.02,5 ) ,
+            Right( ct.03,5 ) ,
+            Right( ct.04,5 ) ,
+            Right( ct.05,5 ) ,
+            Right( ct.06,5 ) ,
+            Right( ct.07,5 ) ,
+            Right( ct.08,5 ) ,
+            Right( ct.09,5 ) ,
+            Right( ct.10,5 ) ,
+            Right( ct.11,5 ) ,
+            Right( ct.12,5 ) keyorig Strip( uname )
+   end                                 /* forever                    */
+                                    rc = Trace("O"); rc = trace(bdq_tv)
+   rxv_rc = RXVSAM("CLOSE","@VS")
+
+   if sw.0Sum then,
+      call BDQS_PRINT_SUM              /* Totals                    -*/
+   else do
+      call BDQL_LIST_HDRS              /* Write header lines        -*/
+      if sw.0Detail then,
+         call BDQT_TOTALS              /* Detail totals             -*/
+      end
+
+return                                 /*@ BDQ_GENL_LIST             */
+/*
+   Foot and crossfoot
+.  ----------------------------------------------------------------- */
+BDQC_SUMMARIZE:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   rowsum = ct.01 + ct.02 + ct.03 + ct.04 + ct.05 + ct.06 +,
+            ct.07 + ct.08 + ct.09 + ct.10 + ct.11 + ct.12
+
+   sum.01 = sum.01 + ct.01
+   sum.02 = sum.02 + ct.02
+   sum.03 = sum.03 + ct.03
+   sum.04 = sum.04 + ct.04
+   sum.05 = sum.05 + ct.05
+   sum.06 = sum.06 + ct.06
+   sum.07 = sum.07 + ct.07
+   sum.08 = sum.08 + ct.08
+   sum.09 = sum.09 + ct.09
+   sum.10 = sum.10 + ct.10
+   sum.11 = sum.11 + ct.11
+   sum.12 = sum.12 + ct.12
+
+   if WordPos(user,userkeylist) = 0 then,
+      userkeylist = userkeylist user   /* add it                     */
+   sum.user = sum.user + rowsum
+
+   if WordPos(item,itemkeylist) = 0 then,
+      itemkeylist = itemkeylist item   /* add it                     */
+   sum.item = sum.item + rowsum
+   sum.gt   = sum.gt   + rowsum        /* grand total                */
+
+return                                 /*@ BDQC_SUMMARIZE            */
+/*
+   The detailed records have already been queued.  PUSH the headers
+   onto the top of the stack.
+.  ----------------------------------------------------------------- */
+BDQL_LIST_HDRS:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   push "-------- -------- ----- ----- ----- ----- ----- -----",
+                        "----- ----- ----- ----- ----- -----"
+   push "-User   - Tool - -Jan- -Feb- -Mar- -Apr- -May- -Jun-",
+                         "-Jul- -Aug- -Sep- -Oct- -Nov- -Dec-"
+
+return                                 /*@ BDQL_LIST_HDRS            */
+/*
+.  ----------------------------------------------------------------- */
+BDQS_PRINT_SUM:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   "CLEAR"
+   say  "-User   - Tool - -Jan- -Feb- -Mar- -Apr- -May- -Jun-",
+                         "-Jul- -Aug- -Sep- -Oct- -Nov- -Dec-"
+   say  "-------- -------- ----- ----- ----- ----- ----- -----",
+                        "----- ----- ----- ----- ----- -----"
+   say  "-------- -------- -----",
+        Right(sum.01,5) ,
+        Right(sum.02,5) ,
+        Right(sum.03,5) ,
+        Right(sum.04,5) ,
+        Right(sum.05,5) ,
+        Right(sum.06,5) ,
+        Right(sum.07,5) ,
+        Right(sum.08,5) ,
+        Right(sum.09,5) ,
+        Right(sum.10,5) ,
+        Right(sum.11,5) ,
+        Right(sum.12,5)
+
+   say  "     Grand Total",
+        Right(sum.gt,5)
+   "NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+
+   scrnlen = Sysvar("SYSLTERM")        /* lines on screen            */
+   scrnwid = Sysvar("SYSWTERM")        /* columns on screen          */
+   max_entries = (scrnwid%16) * (scrnlen-3)
+   userkeylist = STRSORT(userkeylist)  /*                           -*/
+   itemkeylist = STRSORT(itemkeylist)  /*                           -*/
+
+   say "       Usage by user "
+
+return                                 /*@ BDQS_PRINT_SUM            */
+/*
+   Queue totals for the detail request.
+.  ----------------------------------------------------------------- */
+BDQT_TOTALS:                           /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   queue  "--      --      ",
+          Right(sum.01,5) ,
+          Right(sum.02,5) ,
+          Right(sum.03,5) ,
+          Right(sum.04,5) ,
+          Right(sum.05,5) ,
+          Right(sum.06,5) ,
+          Right(sum.07,5) ,
+          Right(sum.08,5) ,
+          Right(sum.09,5) ,
+          Right(sum.10,5) ,
+          Right(sum.11,5) ,
+          Right(sum.12,5)
+
+return                                 /*@ BDQT_TOTALS               */
+/*
+   Find and delete all lines whose counters are uniformly zero.  If
+   necessary, the VSAM file was closed and reopened to reposition it
+   to the beginning.
+.  ----------------------------------------------------------------- */
+BT_TRIM_DATA:                          /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   rxv_rc = RXVSAM("OPENIO","@VS","KSDS")
+   sw.0SaveLog = 1
+   logpref = "("Branch( "ID" )")"
+   call ZL_LOGMSG( logpref  ,
+                   vsamksds "opened for UPDATE")
+
+   do forever
+      rxv_rc = RXVSAM("READNEXT","@VS",,"RECORD")
+      if rxv_rc > 0 then leave
+
+      parse var record user . 9 item . 17,
+                ct.01 ct.02 ct.03 ct.04 ct.05 ct.06,
+                ct.07 ct.08 ct.09 ct.10 ct.11 ct.12,
+                keyorig  uname
+
+      if ct.01 + ct.02 + ct.03 + ct.04 + ct.05 + ct.06 +,
+         ct.07 + ct.08 + ct.09 + ct.10 + ct.11 + ct.12 = 0 then do
+         if noupdt = 0 then,           /* OK to update               */
+            key = Left(user,8)Left(item,8)
+            rxv_rc = RXVSAM("DELETE","@VS","KEY")
+            logpref = "("Branch( "ID" )")"
+            call ZL_LOGMSG( logpref  ,
+                            "KEY:"user"."item "was trimmed.")
+         end
+
+   end                                 /* forever                    */
+   rxv_rc = RXVSAM("CLOSE","@VS")
+
+return                                 /*@ BT_TRIM_DATA              */
+/*
+   A one-month DUMP file has been specified for input.
+   The input is a flatfile with 3 tokens per line: user, item, count.
+.  ----------------------------------------------------------------- */
+C_DUMP_OPS:                            /*@                           */
+   c_tv = trace()                      /* what setting at entry ?    */
+   if branch then call BRANCH
+   address TSO
+
+   call CA_LOAD_COUNTS                 /* byuser. and byitem.       -*/
+
+   call BDMU_GET_NAMES                 /* identify users            -*/
+
+   if sw.0List then do
+      call BDMB_USERLIST               /* list sorted by user       -*/
+      call BDMC_ITEMLIST               /* list sorted by tool       -*/
+      end                              /* sw.0list                   */
+
+   if sw.0Sum  then do
+      call BDMS_SUMMARY                /* summary counts only       -*/
+      end                              /* sw.0list                   */
+   return                              /* execution blocked          */
+                                     rc = Trace("O"); rc = trace(c_tv)
+   if replist <> "" then do
+      do Words( replist )
+         parse var replist  uid replist
+         wc = Words( name.uid )
+         ln = Word( name.uid,wc )
+         fn = Subword( name.uid,1,wc-1 )
+         queue Left( uid,9 ) Left( fn,13 ) ln
+      end
+      if noupdt = 0 then,              /* OK to update               */
+         "WHOIS (( ADD"                /* add these to WHOIS         */
+      end
+
+return                                 /*@ C_DUMP_OPS                */
+/*
+   Parse DUMPIN.  It may be a full DSN or just 'DUMPyymm'.
+.  ----------------------------------------------------------------- */
+CA_LOAD_COUNTS:                        /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   If Length(dumpin) = 8 then do       /* DUMP0701 maybe             */
+      indsn = "'"nvpref".SYSUMON."dumpin"'"
+      dumpmo = dumpin
+      end
+   else do                             /* full DSN ?                 */
+      if Left(dumpin,1) = "'" then,    /* quoted                     */
+         indsn = dumpin                /* take it as-is              */
+      else,
+         indsn = "'"dumpin"'"          /* add quotes                 */
+      parse value Strip(Reverse(indsn),,"'")  with,
+                  dumpmo "."
+      dumpmo = Reverse(dumpmo)
+      end
+   /* INDSN is now a real DSN...                                     */
+   if Sysdsn(indsn) <> "OK" then,      /* bad DSN                    */
+      do
+      say "Unable to resolve" dumpin "to a real dataset name."
+      exit                             /* we're done.                */
+      end
+   /* If you get here, you have a valid DSN...                       */
+   "ALLOC FI(@TMP) DA("indsn") SHR REU"
+   "NEWSTACK"                          /* isolate the queue          */
+   "EXECIO * DISKR @TMP (FINIS"        /* load the queue             */
+   "FREE  FI(@TMP)"
+
+   do queued()                         /* process the queue          */
+      parse pull user item count altname.user
+
+      if WordPos(user,uidlist) = 0 then ,
+         uidlist = uidlist user
+      if WordPos(item,items  ) = 0 then ,
+         items   = items   item
+
+      if caller <> "" & caller <> user then iterate
+      if tool   <> "" & tool   <> item then iterate
+
+      userkey = user"."item
+      userkeylist = userkeylist userkey
+      byuser.userkey = count
+      byuser.user    = byuser.user + count
+
+      itemkey = item"."user
+      itemkeylist = itemkeylist itemkey
+      byitem.itemkey = count
+      byitem.item    = byitem.item + count
+   end                                 /* queued                     */
+
+   userkeylist = STRSORT(userkeylist)
+   itemkeylist = STRSORT(itemkeylist)
+
+return                                 /*@ CA_LOAD_COUNTS            */
+/*
+.  ----------------------------------------------------------------- */
+SHIFT: Procedure                       /*@                           */
+   address TSO
+
+   shifted = ""
+   arg wordlist
+   do Words( wordlist )
+      parse var wordlist  word  wordlist
+      low = Translate(word,,
+                  "abcdefghijklmnopqrstuvwxyz",,
+                  "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      word  = Left(word,1)Substr(low,2)
+      shifted = shifted  word
+   end                                 /* wordlist                   */
+
+return( shifted )                      /*@ SHIFT                     */
+/*
+.  ----------------------------------------------------------------- */
+LOCAL_PREINIT:                         /*@ customize opts            */
+   address TSO
+   rc = Trace("O") ; rc = trace( tv )
+
+   sw.0restarted = SWITCH( "RESTARTED" ) /* in LOCAL_PREINIT         */
+   if sw.inispf = 0 then return        /* prevent RUNDATA failure    */
+
+   parse value '' with rxvsamll nvpref vspref
+   "NEWSTACK"
+   "RUNDATA READ  TBLKEY SYSUMON "  /* sets RXVSAMLL, NVPREF, VSPREF */
+   do queued()                         /* return from RUNDATA        */
+      pull tag tagval
+      tagval  = Space( tagval,1 )
+      @z   = Value( tag,tagval )       /* tag <-- tagval             */
+   end                                 /* queued                     */
+   "DELSTACK"
+   if Words( rxvsamll nvpref vspref ) <> 3 then do
+      helpmsg = "Some required information was not provided by",
+                "RUNDATA.  Please ensure that RUNDATA key SYSUMON",
+                "includes all of RXVSAMLL, NVPREF, and VSPREF."
+      call HELP                        /* ...and exit               -*/
+      end
+
+   sw.0SaveLog = SWITCH( "SAVELOG" )
+   parse value  KEYWD("VSAMIN") "'"vspref".SYSUMON.KSD'" with,
+                vsamksds   .
+
+return                                 /*@ LOCAL_PREINIT             */
+/*   subroutines below LOCAL_PREINIT are not selected by SHOWFLOW    */
+/*
+.  ----------------------------------------------------------------- */
+ZB_SAVELOG:                            /*@                           */
+   if branch then call BRANCH
+   address TSO
+
+   if Symbol("LOG#") = "LIT" then return          /* not yet set     */
+
+   "ALLOC FI(@LOG) DA("logdsn") REU" vb4k.0
+   "EXECIO" log# "DISKW @LOG (STEM LOG. FINIS"
+   "FREE  FI(@LOG)"
+
+return                                 /*@ ZB_SAVELOG                */
+/*
+.  ----------------------------------------------------------------- */
+ZL_LOGMSG: Procedure expose,           /*@                           */
+   (tk_globalvars)  log. log#
+   rc = Trace("O")
+   address TSO
+
+   parse arg msgtext
+   parse value  log#+1  msgtext     with,
+                zz      log.zz    1  log#   .
+
+   if monitor then say,
+      msgtext
+
+return                                 /*@ ZL_LOGMSG                 */
+/*
+.  ----------------------------------------------------------------- */
+HELP:                                  /*@                           */
+address TSO;"CLEAR" ; say ""
+if Symbol( 'nvpref' ) = 'LIT' then,
+   call LOCAL_PREINIT                  /* set RUNDATA values        -*/
+if helpmsg <> "" then say helpmsg
+ex_nam = Left(exec_name,8)             /* predictable size           */
+
+say "                                                                          "
+say "  "ex_nam"      (v.2) prints and displays selected tool-usage.  Will clean"
+say "                up and reset counts for prior months if DUMPTO is         "
+say "                specified.  RUNDATA supplies several required datapoints. "
+say "                                                                          "
+say "  Syntax:   "ex_nam"  USER     uid                                        "
+say "                      TOOL     toolname                                   "
+say "                      LIST                                                "
+say "                      SUMMARY                         (valid only if LIST)"
+say "                      INDUMP   dumpid                                     "
+say "                      DUMP     nn                                         "
+say "                      DUMPTO   dsn | 'DEFAULT'                            "
+say "                      CLEAR                                               "
+say "                      TRIM                                                "
+say "                 ((   VSAMIN   vdsn                             (Defaults)"
+say "                      SAVELOG                                             "
+say "                                                                          "
+say "            uid       identifies a user for whom usage is to be displayed "
+say "                                                                          "
+say "            toolname  identifies a piece of software for which usage is to"
+say "                      be displayed.                                       "
+say "                                                                          "
+say "                                                         more...          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "                                                                          "
+say "            LIST      indicates that a display of usage is to shown.      "
+say "                                                                          "
+say "            SUMMARY   cause a report by-user and by-tool to be produced   "
+say "                                                                          "
+say "            dumpid    identifies a SYSUMON dumpfile to be used as input.  "
+say "                      It may be specified as only the last node           "
+say "                      (e.g.:  DUMP0701) or as the entire DSN, e.g.:       "
+say "                      '"nvpref".SYSUMON.DUMP0701'.  If INDUMP is          "
+say "                      specified, DUMP, DUMPTO, CLEAR, TRIM, and VSAMIN are"
+say "                      ignored.                                            "
+say "                                                                          "
+say "            nn        specifies a month which is to be dumped.  If not    "
+say "                      specified, nn defaults to the prior month.          "
+say "                                                                          "
+say "            dsn       specifies a dataset to receive the dumped data.     "
+say "                      You may specify 'DEFAULT' and a name will be built  "
+say "                      as '"nvpref".SYSUMON.DUMPyymm'.  If DUMPTO is       "
+say "                      not specified, the data will not be cleared from the"
+say "                      dataset regardless of any other setting.            "
+say "                                                                          "
+say "                                                         more...          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "                                                                          "
+say "            CLEAR     causes the column for the specified or defaulted    "
+say "                      dump-month to be zeroed after dumping.  This is only"
+say "                      valid if DUMP has been specified.                   "
+say "                                                                          "
+say "            TRIM      purges any row for which all counters are zero.     "
+say "                                                                          "
+say "            vdsn      specifies a VSAM KSDS which contains the usage data."
+say "                      If not specified, it defaults to                    "
+say "                                '"vspref".SYSUMON.KSD'                    "
+say "                                                                          "
+say "            SAVELOG   causes the progress log to be saved at termination. "
+say "                      The default behavior is to purge the log unless it  "
+say "                      reports updates to the VSAM file, in which case it  "
+say "                      is preserved.                                       "
+say "                                                                          "
+say "                                                         more...          "
+"NEWSTACK"; pull ; "CLEAR" ; "DELSTACK"
+say "   Debugging tools provided include:                                      "
+say "                                                                          "
+say "        MONITOR   displays key information throughout processing.         "
+say "                                                                          "
+say "        NOUPDT    by-pass all update logic.                               "
+say "                                                                          "
+say "        BRANCH    show all paragraph entries.                             "
+say "                                                                          "
+say "        TRACE tv  will use value following TRACE to place the             "
+say "                  execution in REXX TRACE Mode.                           "
+say "                                                                          "
+say "                                                                          "
+say "   Debugging tools can be accessed in the following manner:               "
+say "                                                                          "
+say "        TSO "ex_nam"  parameters     ((  debug-options                    "
+say "                                                                          "
+say "   For example                                                            "
+say "                                                                          "
+say "        TSO "ex_nam" DUMP LIST SUMMARY (( MONITOR TRACE ?R                "
+if sw.inispf then,
+   address ISPEXEC "CONTROL DISPLAY REFRESH"
+exit                                   /*@ HELP                      */
+/*
+.  ----------------------------------------------------------------- */
+BRANCH: Procedure expose,              /*@                           */
+        sigl exec_name
+   rc = trace("O")                     /* we do not want to see this */
+   arg brparm .
+
+   origin = sigl                       /* where was I called from ?  */
+   do currln = origin to 1 by -1       /* inch backward to label     */
+      if Right(Word(Sourceline(currln),1),1) = ":" then do
+         parse value sourceline(currln) with pgfname ":" .  /* Label */
+         leave ; end                   /*                name        */
+   end                                 /* currln                     */
+
+   select
+      when brparm = "NAME" then return(pgfname) /* Return full name  */
+      when brparm = "ID"      then do           /* wants the prefix  */
+         parse var pgfname pgfpref "_" .        /* get the prefix    */
+         return(pgfpref)
+         end                           /* brparm = "ID"              */
+      otherwise
+         say left(sigl,6) left(pgfname,40) exec_name "Time:" time("L")
+   end                                 /* select                     */
+
+return                                 /*@ BRANCH                    */
+/*
+.  ----------------------------------------------------------------- */
+DUMP_QUEUE:                            /*@ Take whatever is in stack */
+   rc = trace("O")                     /*  and write to the screen   */
+   address TSO
+   arg mode .
+
+   "QSTACK"                            /* how many stacks?           */
+   stk2dump    = rc - tk_init_stacks   /* remaining stacks           */
+   if stk2dump = 0 & queued() = 0 then return
+   if mode <> "QUIET" then,
+   say "Total Stacks" rc ,             /* rc = #of stacks            */
+    "   Begin Stacks" tk_init_stacks , /* Stacks present at start    */
+    "   Excess Stacks to dump" stk2dump
+
+   do dd = rc to tk_init_stacks by -1  /* empty each one.            */
+      if mode <> "QUIET" then,
+      say "Processing Stack #" dd "   Total Lines:" queued()
+      do queued();parse pull line;say line;end /* pump to the screen */
+      "DELSTACK"                       /* remove stack               */
+   end                                 /* dd = 1 to rc               */
+
+return                                 /*@ DUMP_QUEUE                */
+/* Handle CLIST-form keywords             added 20020513
+.  ----------------------------------------------------------------- */
+CLKWD: Procedure expose info           /*@ hide all except info      */
+   arg kw
+   kw = kw"("                          /* form is 'KEY(DATA)'        */
+   kw_pos = Pos(kw,info)               /* find where it is, maybe    */
+   if kw_pos = 0 then return ""        /* send back a null, not found*/
+   rtpt   = Pos(") ",info" ",kw_pos)   /* locate end-paren           */
+   slug   = Substr(info,kw_pos,rtpt-kw_pos+1)     /* isolate         */
+   info   = Delstr(info,kw_pos,rtpt-kw_pos+1)     /* excise          */
+   parse var slug (kw)     slug        /* drop kw                    */
+   slug   = Reverse(Substr(Reverse(Strip(slug)),2))
+return slug                            /*@CLKWD                      */
+/* Handle multi-word keys 20020513
+.  ----------------------------------------------------------------- */
+KEYWD: Procedure expose info           /*@ hide all vars, except info*/
+   arg kw                              /* form is 'KEY DATA'         */
+   kw_pos = wordpos(kw,info)           /* find where it is, maybe    */
+   if kw_pos = 0 then return ""        /* send back a null, not found*/
+   kw_val = word(info,kw_pos+Words(kw))/* get the next word          */
+   info   = Delword(info,kw_pos,2)     /* remove both                */
+return kw_val                          /*@ KEYWD                     */
+/*
+.  ----------------------------------------------------------------- */
+KEYPHRS: Procedure expose,             /*@                           */
+         info helpmsg exec_name        /*  except these three        */
+   arg kp                              /* form is 'KEY ;: DATA ;:'   */
+   wp    = wordpos(kp,info)            /* where is it?               */
+   if wp = 0 then return ""            /* not found                  */
+   front = subword(info,1,wp-1)        /* everything before kp       */
+   back  = subword(info,wp+1)          /* everything after kp        */
+   parse var back dlm back             /* 1st token must be 2 bytes  */
+   if length(dlm) <> 2 then            /* Must be two bytes          */
+      helpmsg = helpmsg,
+         "Invalid length for delimiter("dlm") with KEYPHRS("kp")"
+   if wordpos(dlm,back) = 0 then       /* search for ending delimiter*/
+      helpmsg = helpmsg,
+         "No matching second delimiter("dlm") with KEYPHRS("kp")"
+   if helpmsg <> "" then call HELP     /* Something is wrong         */
+   parse var back kpval (dlm) back     /* get everything b/w delim   */
+   info =  front back                  /* restore remainder          */
+return Strip(kpval)                    /*@ KEYPHRS                   */
+/*
+.  ----------------------------------------------------------------- */
+NOVALUE:                               /*@                           */
+   say exec_name "raised NOVALUE at line" sigl
+   say " "
+   say "The referenced variable is" condition("D")
+   say " "
+   zsigl = sigl
+   signal SHOW_SOURCE                  /*@ NOVALUE                   */
+/*
+.  ----------------------------------------------------------------- */
+SHOW_SOURCE:                           /*@                           */
+   call DUMP_QUEUE                     /* Spill contents of stacks  -*/
+   if sourceline() <> "0" then         /* to screen                  */
+      say sourceline(zsigl)
+   rc =  trace("?R")
+   nop
+   exit                                /*@ SHOW_SOURCE               */
+/*
+.  ----------------------------------------------------------------- */
+SS: Procedure                          /*@ Show Source               */
+   arg  ssbeg  ssct   .                /* 'call ss 122 6' maybe      */
+   if ssct  = "" then ssct  = 10
+   if \datatype(ssbeg,"W") | \datatype(ssct,"W") then return
+   ssend = ssbeg + ssct
+   do ssii = ssbeg to ssend ; say Strip(sourceline(ssii),'T') ; end
+return                                 /*@ SS                        */
+/*
+.  ----------------------------------------------------------------- */
+SWITCH: Procedure expose info          /*@                           */
+   arg kw                              /* form is 'KEY'              */
+   sw_val = Wordpos(kw,info) > 0       /* exists = 1; not found = 0  */
+   if sw_val then                      /* exists                     */
+      info = Delword(info,Wordpos(kw,info),1) /* remove it           */
+return sw_val                          /*@ SWITCH                    */
+/*
+.  ----------------------------------------------------------------- */
+SYNTAX:                                /*@                           */
+   errormsg = exec_name "encountered REXX error" rc "in line" sigl":",
+                        errortext(rc)
+   say errormsg
+   zsigl = sigl
+   signal SHOW_SOURCE                  /*@ SYNTAX                    */
+/*
+   Can call TRAPOUT.
+.  ----------------------------------------------------------------- */
+TOOLKIT_INIT:                          /*@                           */
+   address TSO
+   info = Strip(opts,"T",")")          /* clip trailing paren        */
+
+   parse source  sys_id  how_invokt  exec_name  DD_nm  DS_nm,
+                     as_invokt  cmd_env  addr_spc  usr_tokn
+
+   parse value "" with  tv  helpmsg  .
+   parse value 0   "ISR00000  YES"     "Error-Press PF1"    with,
+               sw.  zerrhm    zerralrm  zerrsm
+
+   if SWITCH("TRAPOUT") then do
+      "TRAPOUT" exec_name parms "(( TRACE R" info
+      exit
+      end                              /* trapout                    */
+
+   sw.nested    = sysvar( "SYSNEST" ) = "YES"
+   sw.batch     = sysvar( "SYSENV"  ) = "BACK"
+   sw.inispf    = sysvar( "SYSISPF" ) = "ACTIVE"
+
+   "QSTACK" ; tk_init_stacks = rc      /* How many stacks?           */
+
+   parse value SWITCH("BRANCH") SWITCH("MONITOR") SWITCH("NOUPDT") with,
+               branch           monitor           noupdt    .
+
+   parse value mvsvar("SYSNAME") sysvar("SYSNODE") with,
+               #tk_cpu           node          .
+
+   parse value KEYWD("TRACE")  "N"    with   tv  .
+   tk_globalvars = "exec_name  tv  helpmsg  sw.  zerrhm  zerralrm ",
+                   "zerrsm  zerrlm  tk_init_stacks  branch  monitor ",
+                   "noupdt"
+
+   call LOCAL_PREINIT                  /* for more opts             -*/
+   if Word(parms,1) = "?" then call HELP /* I won't be back          */
+
+return                                 /*@ TOOLKIT_INIT              */

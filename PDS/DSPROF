@@ -1,0 +1,37 @@
+/* REXX   DSPROF    Examine the size and shape of a dataset
+                    via LISTDSI
+*/
+arg dsn  file
+if file = '' then,
+if Substr(dsn,1,1) <> "'" then,
+   dsn = "'"Userid()"."dsn"'"
+address TSO
+/* works with error LISTDSI(dsn  file) */
+/* works with error LISTDSI(dsn  file  directory ) */
+/* works with error LISTDSI(dsn  file  directory   norecall ) */
+x = LISTDSI(dsn  file  directory norecall)
+"CLEAR"
+say  Right("      DSN: ",12) sysdsname
+say  Right("    DSORG: ",12) sysdsorg
+say  Right("    RECFM: ",12) sysrecfm
+say  Right("    LRECL: ",12) syslrecl
+say  Right("  Created: ",12) syscreate
+say  Right("  LastRef: ",12) sysrefdate
+say  Right("    BLKSZ: ",12) sysblksize
+say  Right("    Alloc: ",12) sysalloc
+say  Right("     Used: ",12) sysused
+say  Right("  Members: ",12) sysmembers
+say  Right("  Primary: ",12) sysprimary
+say  Right("Secondary: ",12) sysseconds
+say  Right("    Units: ",12) sysunits
+say  Right("  Extents: ",12) sysextents
+say  Right(" D/Blocks: ",12) sysadirblk
+say  Right(" U/Blocks: ",12) sysudirblk
+say  Right(" MGMT Cls: ",12) sysmgmtclass
+say  Right(" STOR Cls: ",12) sysstorclass
+say  Right(" DATA Cls: ",12) sysdataclass
+say  Right("   Reason: ",12) sysreason
+say  Right("  Msglvl1: ",12) sysmsglvl1
+say  Right("  Msglvl2: ",12) sysmsglvl2
+say  Right("       RC: ",12) x
+exit                                   /*                            */

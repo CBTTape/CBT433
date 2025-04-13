@@ -1,0 +1,10 @@
+/* REXX    ICEUSER    Return "special" users via stack
+        Written by Chris Lewis 19951031
+*/
+iceuser = " FCLARKE SBGOLOB CBT001 "
+
+nested = Sysvar("SYSNEST") = "YES"
+
+if nested then push iceuser            /* return via the stack       */
+          else say "Special Users:" iceuser
+exit                                   /*@ ICEUSER                   */

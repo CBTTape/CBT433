@@ -1,0 +1,29 @@
+/* REXX    EDBR       Invoke Edit from Browse or View.
+                      (Positions to proper line from Browse only.)
+
+           NOTE ::::  MUST    be invoked via the command table:
+                SELECT CMD(%EDBR |&ZDSN |&ZMEM |&ZMEMB | &ZLINES)
+
+                      Requires POSIT macro.
+
+           Written by Frank Clarke  rexxhead@yahoo.com   Oldsmar FL
+*/
+address ISPEXEC
+parse upper arg "|"zdsn . "|"zmem "|"zmemb "|"zlines
+ebdsn   = Strip(zdsn)
+ldrc    = Listdsi("'"zdsn"'" directory norecall)
+parse value  zmem   zmemb       with,
+             ebmem  .
+parse value  Strip(zlines,,0)  0 with,
+             ebtl   .
+if Left(sysdsorg,2) = "PO" then,
+   ebdsn = ebdsn"("ebmem")"
+
+"VPUT (ebtl) SHARED"
+"CONTROL NONDISPL ENTER"
+"EDIT DATASET('"ebdsn"') MACRO(POSIT) PROFILE(DEFAULT)"
+ZEDSMSG = "Updates not shown"
+ZEDLMSG = "The changes made in Edit are not shown here"
+"SETMSG MSG(ISRZ001)"
+
+exit                                   /*@ EDBR                      */
